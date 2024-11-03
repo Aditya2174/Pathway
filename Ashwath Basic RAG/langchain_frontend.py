@@ -55,26 +55,6 @@ if st.button("Submit"):
         retriever = vector_client.as_retriever()
         context = retriever.invoke(user_prompt)
 
-        fused_scores = {}
-        k=60
-        for docs in context:
-            for rank, doc in enumerate(docs):
-                doc_str = json.dumps(doc)
-                # If the document is not yet in the fused_scores dictionary, add it with an initial score of 0
-                # print('\n')
-                if doc_str not in fused_scores:
-                    fused_scores[doc_str] = 0
-                    # Retrieve the current score of the document, if any
-                    previous_score = fused_scores[doc_str]
-                    # Update the score of the document using the RRF formula: 1 / (rank + k)
-                    fused_scores[doc_str] += 1 / (rank + k)
-
-        # final reranked result
-        reranked_results = [
-            (json.loads(doc), score)
-            for doc, score in sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
-        ]
-
         # Prepare full prompt with context and attached document
         full_prompt = f"{user_prompt}\n\nContext: {context}"
         if attached_doc_text:
