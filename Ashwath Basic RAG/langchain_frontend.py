@@ -7,7 +7,8 @@ from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
 from langchain.memory import ConversationBufferMemory
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import MessagesPlaceholder
-import json
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langgraph.prebuilt import create_react_agent
 
 # Set up Google Gemini model with LangChain
 google_api_key = "AIzaSyAw786vp_FhAWxi9vce2IoHon53sGxeCdk"  # Remember to replace with your API key
@@ -23,6 +24,17 @@ vector_client = PathwayVectorClient(host=PATHWAY_HOST, port=PATHWAY_PORT)
 # Initialize memory for chat history
 memory = ConversationBufferMemory(memory_key="chat_history", input_key="user_prompt", return_messages=True)
 
+# Creating a search tool and configuring API settings
+tavily_api_key = "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"
+if not os.environ.get('TAVILY_API_KEY'):
+    os.environ['TAVILY_API_KEY'] = tavily_api_key
+
+search = TavilySearchResults(max_results=5, include_answer=True)
+tools = [search]
+
+# Creating a simple agent to handle tool calling
+agent = create_react_agent(model=model, tools=tools)
+
 st.title("Pathway RAG Application")
 
 # Document uploader - Main Vector Store
@@ -34,11 +46,12 @@ if uploaded_file:
     vector_client.add_documents([document])
     st.success("Document added to the vector store!")
 
-# Chat Input with Document Option
+# Chat input with document option
 st.subheader("Chat with Pathway Vector Store")
 user_prompt = st.text_input("Enter your chat prompt:")
 include_doc = st.checkbox("Include document in chat prompt")
 
+# Extracting text from attached document(if provided)
 attached_doc_text = None
 if include_doc:
     attached_file = st.file_uploader("Attach document to prompt", type=["txt", "json"], key="attached_file")
@@ -73,10 +86,12 @@ if st.button("Submit"):
         
         # Format the prompt and get the response
         formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": memory.chat_memory.messages})
-        response = model.invoke(formatted_prompt).content
-        st.write("Response:", response)
+        final_response = agent.stream(formatted_prompt)
+        stream_responses = [message for message in final_response]
+
+        st.write(f"Final Response: {stream_responses[-1]["agent"]["messages"][0].content}")
 
         # Save AI response back to memory
-        memory.chat_memory.add_message(AIMessage(content=response))
+        memory.chat_memory.add_message(AIMessage(content=stream_responses[-1]["agent"]["messages"][0].content))
     else:
         st.warning("Please enter a prompt for the chat!")
