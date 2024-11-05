@@ -37,27 +37,24 @@ tools = [search]
 agent = create_react_agent(model=model, tools=tools)
 
 def can_answer(user_prompt, attached_doc_text):
-    # Get recent context from memory
-    history_text = "\n".join([msg.content for msg in st.session_state.memory.chat_memory.messages])
-    full_prompt = f"{history_text}\n\nUser Prompt: {user_prompt}"
-
-    if attached_doc_text:
-        full_prompt += f"\n\nAttached Document: {attached_doc_text}"
-
     template = [
-        SystemMessage(content=( 
-            "Determine if you can answer the user’s prompt based on the current chat history and any attached document. "
-            "If the chat history or attached document provides enough context to answer, respond with 'yes'. "
-            "If they do not provide enough context, respond with 'no', and do not attempt to answer the question. "
-        )),
+        SystemMessage(content="Analyze if the prompt is a follow-up question or a standalone question. "
+                              "If it's a follow-up that needs prior context, respond with 'needs more context'. "
+                              "If the prompt can be answered directly, respond with 'direct answer'. "
+                              "If it's an independent question, respond with 'standalone question'."),
         MessagesPlaceholder("chat_history"),
-        HumanMessage(content=full_prompt)
+        HumanMessage(content=user_prompt)
     ]
-
+    
     final_prompt = ChatPromptTemplate.from_messages(template).format_prompt(**{"chat_history": st.session_state.memory.chat_memory.messages})
-    response = model.invoke(final_prompt).content
+    response = model.invoke(final_prompt).content.lower()
 
-    return 1 if 'yes' in response.lower() else 0
+    if 'direct answer' in response:
+        return "direct_answer"
+    elif 'needs more context' in response:
+        return "needs_more_context"
+    else:
+        return "standalone_question"
 
 st.title("Pathway RAG Application")
 
@@ -89,17 +86,16 @@ if include_doc:
 # Submit button logic
 if st.button("Submit"):
     if user_prompt:
-        # Check if the history and attached document (if any) are sufficient to answer
-        is_sufficient = can_answer(user_prompt, attached_doc_text or "")
+        response_type = can_answer(user_prompt, attached_doc_text or "")
 
-        # If sufficient, proceed to answer based on the document and chat history
-        if is_sufficient:
+        if "direct answer" in response_type.lower():
+            st.write("Direct answer")
             full_prompt = user_prompt
             if attached_doc_text:
                 full_prompt += f"\n\nAttached Document: {attached_doc_text}"
 
             template = [
-                SystemMessage(content="Answer the user’s prompt based on the chat history and the attached document(if any)."),
+                SystemMessage(content="Answer the user’s prompt based on the chat history and the attached document (if any)."),
                 MessagesPlaceholder("chat_history"),
                 HumanMessage(content=full_prompt)
             ]
@@ -108,28 +104,53 @@ if st.button("Submit"):
             # Format the prompt and get the response
             formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": st.session_state.memory.chat_memory.messages})
             response = model.invoke(formatted_prompt).content
-            st.write(f"Final Response: {response}")
+            final_response = agent.stream(formatted_prompt)
+            stream_responses = [message for message in final_response]
+
+            response_content = stream_responses[-1]['agent']['messages'][0].content
+            st.write(f"Final Response: {response_content}")
 
             # Update memory with the new user message and context
             st.session_state.memory.chat_memory.add_message(HumanMessage(content=user_prompt))
-            # Save AI response back to memory
-            st.session_state.memory.chat_memory.add_message(AIMessage(content=response))
+            st.session_state.memory.chat_memory.add_message(AIMessage(content=response_content))
 
-        # If not sufficient, retrieve context from the vector store and respond
-        else:
-            # Retrieve context from the vector store        
-            retriever = vector_client.as_retriever(search_type="similarity_score_threshold", search_kwargs={'score_threshold': 0.5})
+        elif "needs_more_context" in response_type.lower():
+            st.write("Needs more context")
+            retriever = vector_client.as_retriever()
             context = retriever.invoke(user_prompt)
+            
+            content_list = [doc.page_content for doc in context]
+            st.write(f"Context: {content_list}")
 
-            # Prepare full prompt with context and attached document
-            full_prompt = f"{user_prompt}\n\nContext: {context}"
+            full_prompt = f"{user_prompt}\n\nContext: {content_list}"
             if attached_doc_text:
                 full_prompt += f"\n\nAttached Document: {attached_doc_text}"
 
-            # Create chat prompt template with memory
             template = [
                 SystemMessage(content="Answer using the context provided."),
                 MessagesPlaceholder("chat_history"),
+                HumanMessage(content=full_prompt)
+            ]
+            chat_prompt_template = ChatPromptTemplate.from_messages(template)
+
+            formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": st.session_state.memory.chat_memory.messages})
+            final_response = agent.stream(formatted_prompt)
+            stream_responses = [message for message in final_response]
+
+            response_content = stream_responses[-1]['agent']['messages'][0].content
+            st.write(f"Final Response: {response_content}")
+
+            st.session_state.memory.chat_memory.add_message(HumanMessage(content=user_prompt))
+            st.session_state.memory.chat_memory.add_message(AIMessage(content=response_content))
+
+        else:  # standalone_question
+            st.write("Standalone question")
+            full_prompt = user_prompt
+            if attached_doc_text:
+                full_prompt += f"\n\nAttached Document: {attached_doc_text}"
+
+            template = [
+                SystemMessage(content="Answer the user’s prompt as a standalone question."),
                 HumanMessage(content=full_prompt)
             ]
             chat_prompt_template = ChatPromptTemplate.from_messages(template)
@@ -142,9 +163,7 @@ if st.button("Submit"):
             response_content = stream_responses[-1]['agent']['messages'][0].content
             st.write(f"Final Response: {response_content}")
 
-            # Update memory with the new user message and context
             st.session_state.memory.chat_memory.add_message(HumanMessage(content=user_prompt))
-            # Save AI response back to memory
             st.session_state.memory.chat_memory.add_message(AIMessage(content=response_content))
 
     else:
