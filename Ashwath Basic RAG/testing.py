@@ -12,7 +12,7 @@ from llama_index.tools.tavily_research import TavilyToolSpec
 from llama_index.core.tools.function_tool import FunctionTool
 
 # Initialize Google Gemini model with LlamaIndex
-google_api_key = "AIzaSyAw786vp_FhAWxi9vce2IoHon53sGxeCdk"  # Replace with your actual API key
+google_api_key = "AIzaSyAw786vp_FhAWxi9vce2IoHon53sGxeCdk"  # Replace with your API key, or just use mine for now
 if not os.environ.get('GOOGLE_API_KEY'):
     os.environ['GOOGLE_API_KEY'] = google_api_key
 
