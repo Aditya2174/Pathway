@@ -7,6 +7,9 @@ from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.prompts import ChatPromptTemplate
 from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.llms import ChatMessage, MessageRole
+from llama_index.core.agent import ReActAgent
+from llama_index.tools.tavily_research import TavilyToolSpec
+from llama_index.core.tools.function_tool import FunctionTool
 
 # Initialize Google Gemini model with LlamaIndex
 google_api_key = "AIzaSyAw786vp_FhAWxi9vce2IoHon53sGxeCdk"  # Replace with your actual API key
@@ -26,10 +29,13 @@ if 'memory' not in st.session_state:
     st.session_state.memory = ChatMemoryBuffer(token_limit=10000)
 
 # Tavily search tool setup
-# tavily_api_key = "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"
-# if not os.environ.get('TAVILY_API_KEY'):
-#     os.environ['TAVILY_API_KEY'] = tavily_api_key
-# search_tool = TavilyToolSpec(api_key=tavily_api_key)
+tavily_api_key = "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"
+if not os.environ.get('TAVILY_API_KEY'):
+    os.environ['TAVILY_API_KEY'] = tavily_api_key
+search_tool = TavilyToolSpec(api_key=tavily_api_key)
+search_tool = search_tool.to_tool_list()
+
+agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
 
 chat_text_qa_msgs = [
         ChatMessage(
@@ -72,7 +78,7 @@ def determine_response_type(user_prompt):
             content=(
                 "Analyze if the prompt is a follow-up question or a standalone question. "
                 "If it's a follow-up that needs prior context, respond with 'needs more context'. "
-                "If the prompt can be answered directly, respond with 'direct answer'. "
+                "If the prompt can be answered using information provided or with chat history respond with 'direct answer'. "
             ),
         ),
         ChatMessage(role=MessageRole.USER, content=user_prompt),
@@ -107,9 +113,12 @@ if st.button("Submit"):
             context = retriever.retrieve(user_prompt)
             context_text = " ".join([doc.text for doc in context])
             full_prompt = f"Prompt: {full_prompt}\n Context: {context_text}"
+            
+            
+            response = agent.chat(message=full_prompt, chat_history=chat_text_qa_msgs)
+            # final_prompt = ChatPromptTemplate.from_messages(chat_text_qa_msgs).format_messages()
+            # response = gemini_model.chat(final_prompt).message.content
             chat_text_qa_msgs.append(ChatMessage(role=MessageRole.USER, content=full_prompt))
-            final_prompt = ChatPromptTemplate.from_messages(chat_text_qa_msgs).format_messages()
-            response = gemini_model.chat(final_prompt).message.content
             chat_text_qa_msgs.append(ChatMessage(role=MessageRole.CHATBOT, content=response))
             st.write(f"Final Answer: {response}")
     else:
