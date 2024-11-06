@@ -1,0 +1,1 @@
+"content" : "numpy is a math library in python, you can do a bunch of operations in it and use this for making python faster for arrays too. "
