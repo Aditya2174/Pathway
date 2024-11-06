@@ -10,7 +10,7 @@ from pathway.xpacks.llm.parsers import ParseUtf8, ParseUnstructured
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 data_sources = pw.io.fs.read(
-    "/Users/arushigarg/Desktop/sem_5/Pathway/rag/data/input.txt",
+    "data/input.txt",
     format="binary",
     mode="streaming",
     with_metadata=True,
