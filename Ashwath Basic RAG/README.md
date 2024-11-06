@@ -12,3 +12,15 @@ Direct uploads to the database are also supported.
 
 testing.py is an alternative for langchain_frontend.py written using llamaindex features.
 It can serve as a foundation for a better pipeline, as Pathway's integration with Llamaindex is more complete than that with Langchain.
+
+Instructions on installations of libraries needed for testing.py
+Use an Anaconda venv
+1. pip install "pathway[all]"
+2. pip install llama-index
+3. pip install llama-index-tools-tavily-research
+4. pip install llama-index-llms-gemini
+5. pip install streamlit
+6. pip install spacy
+7. pip install sentence-transformers
+
+If any errors persist, reading them will suggest what is pending and needs to be installed.
