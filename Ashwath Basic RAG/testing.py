@@ -1,3 +1,4 @@
+# Necessary imports
 import streamlit as st
 import os
 import pathway as pw
@@ -9,10 +10,9 @@ from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.core.agent import ReActAgent
 from llama_index.tools.tavily_research import TavilyToolSpec
-from llama_index.core.tools.function_tool import FunctionTool
 
-# Initialize Google Gemini model with LlamaIndex
-google_api_key = "AIzaSyAw786vp_FhAWxi9vce2IoHon53sGxeCdk"  # Replace with your API key, or just use mine for now
+# Initialize a Gemini-1.5-Flash model with LlamaIndex
+google_api_key = "AIzaSyAw786vp_FhAWxi9vce2IoHon53sGxeCdk"
 if not os.environ.get('GOOGLE_API_KEY'):
     os.environ['GOOGLE_API_KEY'] = google_api_key
 
@@ -35,20 +35,54 @@ if not os.environ.get('TAVILY_API_KEY'):
 search_tool = TavilyToolSpec(api_key=tavily_api_key)
 search_tool = search_tool.to_tool_list()
 
+# Initializing a simple agent with a search tool
 agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
 
-chat_text_qa_msgs = [
+if 'chat_messages' not in st.session_state:
+    st.session_state.chat_messages = [
         ChatMessage(
             role=MessageRole.SYSTEM,
             content=(
-                "Always answer the question, even if the context isn't helpful."
+                "Answer the question with whatever information is available, and if more is needed, use the tool for a web search. "
+                "If there is not enough information still, ask the user for clarification."
             ),
         ),
-]
-text_qa_template = ChatPromptTemplate.from_messages(chat_text_qa_msgs)
+    ]
 
-# Streamlit UI components
-st.title("Pathway RAG Application with Gemini")
+# Function to reformat user's prompt with history as context
+def contextualize_prompt(user_prompt):
+    context_template = [ChatMessage(role=MessageRole.SYSTEM, content="Use the chat history to recontextualize the user's prompt. \
+        Remove ambiguous references and prepare it for answering. \
+        Return the re-contextualized prompt.")]
+    context_template.extend(st.session_state.chat_messages[1:])
+    context_template.append(ChatMessage(role=MessageRole.USER, content=user_prompt))
+
+    reformat_prompt = ChatPromptTemplate.from_messages(context_template).format_messages()
+    response = gemini_model.chat(messages=reformat_prompt).message.content
+
+    return response
+
+# Identifying whether retrieval is needed
+def determine_response_type(user_prompt):
+    analysis_template = [
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=(
+                "Analyze if the prompt needs chat history or if it requires document retrieval or a web search."
+                "If chat history is required, respond with 'direct answer'."
+                "If additional documents or web searches are needed, respond with 'needs more context'."
+            ),
+        ),
+        ChatMessage(role=MessageRole.USER, content=user_prompt),
+    ]
+    text_qa_template = ChatPromptTemplate.from_messages(analysis_template).format_messages()
+
+    response = gemini_model.chat(text_qa_template).message.content.lower()
+
+    if 'direct answer' in response:
+        return "direct_answer"
+    elif 'needs more context' in response:
+        return "needs_more_context"
 
 # Document uploader for including document text in the chat prompt
 with st.sidebar:
@@ -59,67 +93,47 @@ with st.sidebar:
         attached_doc_text = uploaded_file.read().decode("utf-8")
         st.success("Document text loaded for context!")
 
-# Chat input with optional document attachment
-st.subheader("Chat with Pathway Vector Store")
-user_prompt = st.text_input("Enter your chat prompt:")
-include_doc = st.checkbox("Include uploaded document text in chat prompt")
+# Display the chat history
+for chat in st.session_state.chat_messages:
+    role = "assistant" if chat.role == MessageRole.ASSISTANT else "user"
+    st.chat_message(role).write(chat.content)
 
-# Append document text to prompt if required
-if include_doc and attached_doc_text:
-    full_prompt = f"{user_prompt}\n\nAttached Document: {attached_doc_text}"
-else:
-    full_prompt = user_prompt
+# Chat input for user to enter prompt
+if user_input := st.chat_input("Enter your chat prompt:"):
+    # Add the user's message to chat history immediately
+    st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
+    st.chat_message("user").write(user_input)
 
-# Logic to determine response type and generate answer
-def determine_response_type(user_prompt):
-    chat_text_qa_msgs = [
-        ChatMessage(
-            role=MessageRole.SYSTEM,
-            content=(
-                "Analyze if the prompt is a follow-up question or a standalone question. "
-                "If it's a follow-up that needs prior context, respond with 'needs more context'. "
-                "If the prompt can be answered using information provided or with chat history respond with 'direct answer'. "
-            ),
-        ),
-        ChatMessage(role=MessageRole.USER, content=user_prompt),
-    ]
-    text_qa_template = ChatPromptTemplate.from_messages(chat_text_qa_msgs).format_messages()
+    # Include document text in the prompt if checked
+    full_prompt = f"{user_input}\n\nAttached Document: {attached_doc_text}" if attached_doc_text else user_input
 
-    response = gemini_model.chat(text_qa_template).message.content.lower()
-    st.write("Response type: ", response)
-
-    if 'direct answer' in response:
-        return "direct_answer"
-    elif 'needs more context' in response:
-        return "needs_more_context"
-
-# Submit button logic
-if st.button("Submit"):
-    if user_prompt:
-        response_type = determine_response_type(user_prompt)
+    # Process user prompt
+    contextualized_prompt = contextualize_prompt(full_prompt)
+    response_type = determine_response_type(contextualized_prompt)
+    
+    # Retrieve answer based on response type
+    if response_type == "direct_answer":
+        context = retriever.retrieve(contextualized_prompt)
+        context_text = " ".join([doc.text for doc in context])
+        final_prompt = f"Prompt: {contextualized_prompt}\n Context: {context_text}"
         
-        if response_type == "direct_answer":
-            st.write("Direct answer")
-            context = retriever.retrieve(user_prompt)
-            context_text = " ".join([doc.text for doc in context])
-            full_prompt = f"Prompt: {full_prompt}\n Context: {context_text}"
-            chat_text_qa_msgs.append(ChatMessage(role=MessageRole.USER, content=full_prompt))
-            final_prompt = ChatPromptTemplate.from_messages(chat_text_qa_msgs).format_messages()
-            response = gemini_model.chat(final_prompt).message.content
-            chat_text_qa_msgs.append(ChatMessage(role=MessageRole.CHATBOT, content=response))
-            st.write(f"Final Answer: {response}")
-        elif response_type == "needs_more_context":
-            st.write("Needs more context")
-            context = retriever.retrieve(user_prompt)
-            context_text = " ".join([doc.text for doc in context])
-            full_prompt = f"Prompt: {full_prompt}\n Context: {context_text}"
-            
-            
-            response = agent.chat(message=full_prompt, chat_history=chat_text_qa_msgs)
-            # final_prompt = ChatPromptTemplate.from_messages(chat_text_qa_msgs).format_messages()
-            # response = gemini_model.chat(final_prompt).message.content
-            chat_text_qa_msgs.append(ChatMessage(role=MessageRole.USER, content=full_prompt))
-            chat_text_qa_msgs.append(ChatMessage(role=MessageRole.CHATBOT, content=response))
-            st.write(f"Final Answer: {response}")
-    else:
-        st.warning("Please enter a prompt for the chat!")
+        # Add the user's message to chat history
+        st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=final_prompt))
+        
+        # Get the model's response
+        response = gemini_model.chat(ChatPromptTemplate.from_messages(st.session_state.chat_messages).format_messages()).message.content
+        st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
+        st.chat_message("assistant").write(response)
+
+    elif response_type == "needs_more_context":
+        context = retriever.retrieve(contextualized_prompt)
+        context_text = " ".join([doc.text for doc in context])
+        final_prompt = f"Prompt: {contextualized_prompt}\n Context: {context_text}"
+        
+        # Add the user's message to chat history
+        st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=final_prompt))
+        
+        # Get the agent's response
+        response = agent.chat(message=final_prompt, chat_history=st.session_state.chat_messages).response
+        st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
+        st.chat_message("assistant").write(response)
