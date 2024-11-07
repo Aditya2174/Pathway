@@ -1,8 +1,6 @@
 # Necessary imports
 import streamlit as st
 import os
-import pathway as pw
-from pathway.xpacks.llm.vector_store import VectorStoreClient
 from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.prompts import ChatPromptTemplate
@@ -21,7 +19,7 @@ gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)
 # Pathway server configuration
 PATHWAY_HOST = "127.0.0.1"
 PATHWAY_PORT = 8755
-vector_client = VectorStoreClient(host=PATHWAY_HOST, port=PATHWAY_PORT)
+
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT)
 
 # Initialize memory if not already in session state
