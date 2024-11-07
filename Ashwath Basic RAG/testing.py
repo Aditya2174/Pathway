@@ -76,9 +76,9 @@ def determine_response_type(user_prompt):
         ),
         ChatMessage(role=MessageRole.USER, content=user_prompt),
     ]
-    text_qa_template = ChatPromptTemplate.from_messages(analysis_template).format_messages()
-
-    response = gemini_model.chat(text_qa_template).message.content.lower()
+    analysis_template = ChatPromptTemplate.from_messages(analysis_template).format_messages()
+    analysis_template.extend(st.session_state.chat_messages[1:])
+    response = gemini_model.chat(analysis_template).message.content.lower()
 
     if 'direct answer' in response:
         return "direct_answer"
