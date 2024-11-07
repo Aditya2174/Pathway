@@ -1,23 +1,25 @@
 import pathway as pw
-from pathway.xpacks.llm.vector_store import VectorStoreServer
+import os
+# from pathway.xpacks.llm.vector_store import VectorStoreServer
 from sentence_transformers import SentenceTransformer
-import asyncio
-import threading
+from splitter import DefaultSentenceCountSplitter
+from vector_store import VectorStoreServer
 from pathway.xpacks.llm.splitters import TokenCountSplitter
 from pathway.xpacks.llm.embedders import BaseEmbedder , SentenceTransformerEmbedder
 from pathway.xpacks.llm.parsers import ParseUtf8, ParseUnstructured
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
+if 'TESSDATA_PREFIX' not in os.environ:
+    os.environ['TESSDATA_PREFIX'] = '/usr/local/share/tessdata'
 
 data_sources = pw.io.fs.read(
-    "data/input.txt",
+    "./data",
     format="binary",
     mode="streaming",
     with_metadata=True,
 )
 
 
-splitter = TokenCountSplitter(min_tokens=1, max_tokens=100)
+splitter = DefaultSentenceCountSplitter(min_sentences=3, max_sentences=10)
 embedder = SentenceTransformerEmbedder(model ='all-MiniLM-L6-v2')
 parser = ParseUnstructured() # must have libmagic in system to use this
 
