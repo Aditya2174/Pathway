@@ -43,7 +43,8 @@ if 'chat_messages' not in st.session_state:
         ChatMessage(
             role=MessageRole.SYSTEM,
             content=(
-                "Answer the question with whatever information is available, and if more is needed, use the tool for a web search. "
+                "Answer the question with whatever information is available, and if more is needed, use the tool for a web search.\
+                     Use the context provided if any is available. "
                 "If there is not enough information still, ask the user for clarification."
             ),
         ),
@@ -68,8 +69,8 @@ def determine_response_type(user_prompt):
         ChatMessage(
             role=MessageRole.SYSTEM,
             content=(
-                "Analyze if the prompt needs chat history or if it requires document retrieval or a web search."
-                "If chat history is required, respond with 'direct answer'."
+                "Analyze if the prompt can be answered using chat history alone or if it requires document retrieval or a web search."
+                "If chat history is sufficient, respond with 'direct answer'."
                 "If additional documents or web searches are needed, respond with 'needs more context'."
             ),
         ),
@@ -114,8 +115,8 @@ if user_input := st.chat_input("Enter your chat prompt:"):
     # Retrieve answer based on response type
     if response_type == "direct_answer":
         context = retriever.retrieve(contextualized_prompt)
-        context_text = " ".join([doc.text for doc in context])
-        final_prompt = f"Prompt: {contextualized_prompt}\n Context: {context_text}"
+        context_text = "\n".join([doc.text for doc in context])
+        final_prompt = f"Prompt: {contextualized_prompt}\nContext: {context_text}"
         
         # Add the user's message to chat history
         st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=final_prompt))
@@ -127,8 +128,8 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
     elif response_type == "needs_more_context":
         context = retriever.retrieve(contextualized_prompt)
-        context_text = " ".join([doc.text for doc in context])
-        final_prompt = f"Prompt: {contextualized_prompt}\n Context: {context_text}"
+        context_text = "\n".join([doc.text for doc in context])
+        final_prompt = f"Prompt: {contextualized_prompt}\nContext: {context_text}"
         
         # Add the user's message to chat history
         st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=final_prompt))
