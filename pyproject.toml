@@ -16,6 +16,12 @@ matplotlib = "^3.9.2"
 unstructured-inference = "^0.8.1"
 python-magic-bin = "^0.4.14"
 
+[tool.poetry.group.evaluations]
+optional = true
+
+[tool.poetry.group.evaluations.dependencies]
+pytest = "^6.0.0"
+
 
 [build-system]
 requires = ["poetry-core"]
