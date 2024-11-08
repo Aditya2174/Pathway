@@ -7,7 +7,6 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<=3.12"
-pathway = {extras = ["xpack-llm-docs"], version = "^0.15.2"}
 torch = "2.0.1"
 sentence-transformers = "^3.2.1"
 pillow-heif = "^0.20.0"
@@ -22,6 +21,17 @@ optional = true
 [tool.poetry.group.evaluations.dependencies]
 pytest = "^6.0.0"
 
+[tool.poetry.group.pathway]
+optional = false
+
+[tool.poetry.group.pathway.dependencies]
+pathway = {extras = ["xpack-llm-docs"], version = "^0.15.2"}
+
+[tool.poetry.group.local]
+optional = true
+
+[tool.poetry.group.local.dependencies]
+pathway = {path = "./PathwayPS", develop = true}
 
 [build-system]
 requires = ["poetry-core"]
