@@ -8,6 +8,7 @@ from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.core.agent import ReActAgent
 from llama_index.tools.tavily_research import TavilyToolSpec
+import pypdf
 
 # Initialize a Gemini-1.5-Flash model with LlamaIndex
 google_api_key = "AIzaSyAw786vp_FhAWxi9vce2IoHon53sGxeCdk"
@@ -24,7 +25,7 @@ retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT)
 
 # Initialize memory if not already in session state
 if 'memory' not in st.session_state:
-    st.session_state.memory = ChatMemoryBuffer(token_limit=10000)
+    st.session_state.memory = ChatMemoryBuffer(token_limit=10000000)
 
 # Tavily search tool setup
 tavily_api_key = "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"
@@ -74,6 +75,7 @@ def determine_response_type(user_prompt):
         ),
         ChatMessage(role=MessageRole.USER, content=user_prompt),
     ]
+
     analysis_template = ChatPromptTemplate.from_messages(analysis_template).format_messages()
     analysis_template.extend(st.session_state.chat_messages[1:])
     response = gemini_model.chat(analysis_template).message.content.lower()
@@ -85,12 +87,21 @@ def determine_response_type(user_prompt):
 
 # Document uploader for including document text in the chat prompt
 with st.sidebar:
-    st.subheader("Upload Document Text for Context")
-    uploaded_file = st.file_uploader("Upload a document", type=["txt", "json"])
+    st.subheader("Upload Documents")
+    uploaded_file = st.file_uploader("Upload a .txt or .json document", type=["txt", "json"])
     attached_doc_text = None
     if uploaded_file:
         attached_doc_text = uploaded_file.read().decode("utf-8")
         st.success("Document text loaded for context!")
+
+    uploaded_pdf = st.file_uploader("Upload a PDF for Context")
+    attached_pdf_text = ""
+    if uploaded_pdf:
+        reader = pypdf.PdfReader(uploaded_pdf)
+        for page in reader.pages:
+            attached_pdf_text += page.extract_text()
+            attached_pdf_text += "\n"
+        st.success("PDF parsed!")
 
 # Display the chat history
 for chat in st.session_state.chat_messages:
@@ -105,17 +116,20 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
     # Include document text in the prompt if checked
     full_prompt = f"{user_input}\n\nAttached Document: {attached_doc_text}" if attached_doc_text else user_input
-
+    full_prompt = f"{full_prompt}\nAttached PDF: {attached_pdf_text}" if attached_pdf_text else full_prompt
+    print(attached_pdf_text[:50])
     # Process user prompt
     contextualized_prompt = contextualize_prompt(full_prompt)
     response_type = determine_response_type(contextualized_prompt)
     
     # Retrieve answer based on response type
     if response_type == "direct_answer":
-        context = retriever.retrieve(contextualized_prompt)
-        context_text = "\n".join([doc.text for doc in context])
-        final_prompt = f"Prompt: {contextualized_prompt}\nContext: {context_text}"
+        print("Direct answer")
+        # context = retriever.retrieve(contextualized_prompt)
+        # context_text = "\n".join([doc.text for doc in context])
+        # final_prompt = f"Prompt: {contextualized_prompt}\nContext: {context_text}"
         
+        final_prompt = f"Prompt: {contextualized_prompt}"
         # Add the user's message to chat history
         st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=final_prompt))
         
@@ -125,6 +139,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         st.chat_message("assistant").write(response)
 
     elif response_type == "needs_more_context":
+        print("Needs more context")
         context = retriever.retrieve(contextualized_prompt)
         context_text = "\n".join([doc.text for doc in context])
         final_prompt = f"Prompt: {contextualized_prompt}\nContext: {context_text}"
