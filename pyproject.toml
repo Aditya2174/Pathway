@@ -13,7 +13,6 @@ pillow-heif = "^0.20.0"
 numpy = "<2.0"
 matplotlib = "^3.9.2"
 unstructured-inference = "^0.8.1"
-python-magic-bin = "^0.4.14"
 
 [tool.poetry.group.evaluations]
 optional = true
@@ -26,12 +25,6 @@ optional = false
 
 [tool.poetry.group.pathway.dependencies]
 pathway = {extras = ["xpack-llm-docs"], version = "^0.15.2"}
-
-[tool.poetry.group.local]
-optional = true
-
-[tool.poetry.group.local.dependencies]
-pathway = {path = "./PathwayPS", develop = true}
 
 [build-system]
 requires = ["poetry-core"]
