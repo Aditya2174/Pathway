@@ -34,6 +34,38 @@ if not os.environ.get('TAVILY_API_KEY'):
 search_tool = TavilyToolSpec(api_key=tavily_api_key)
 search_tool = search_tool.to_tool_list()
 
+reformat_content="""You are an intelligent AI assistant. You will be provided with a user query and the chat history between the user and the chatbot. You will have to identify the type of the query, and give your output according to the following rules:
+- If the context of query is similar to the chat history, reformulate the query based on the chat history. Ensure that the reformulated query is as detailed and contextually rich as possible. Respond with query type as 'reformulation' and output as the reformulated query.
+- If the query is general and unrelated to the chat history and doesn't require any particular information to be answered, then respond with query type as 'general' and output as a polite response to the query.
+- If the query is completely unrelated to the chat history and require additional information to be answered, respond with query type as 'unrelated' and output the gramatically corrected query.
+
+Examples are provided below.
+
+Example 1:
+Chat History:
+user: Who discovered the laws of motion?
+ai: Isaac Newton
+User Query: Tell me more about him
+Query Type: reformulation
+Output: Tell me more about Isaac Newton who discovered the laws of motion.
+
+Example 2:
+Chat History:
+
+User Query: How are you?
+Query Type: general
+Output: I am doing well, thank you for asking. How can I help you today?
+
+Example 3:
+Chat History:
+user: Who discovered the laws of motion?
+ai: Isaac Newton
+User Query: Waht is the capital of France?
+Query Type: unrelated
+Output: What is the capital of France?
+
+"""
+
 # Initializing a simple agent with a search tool
 agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
 
@@ -51,9 +83,7 @@ if 'chat_messages' not in st.session_state:
 
 # Function to reformat user's prompt with history as context
 def contextualize_prompt(user_prompt):
-    context_template = [ChatMessage(role=MessageRole.SYSTEM, content="Use the chat history to recontextualize the user's prompt. \
-        Remove ambiguous references and prepare it for answering. \
-        Return the re-contextualized prompt.")]
+    context_template = [ChatMessage(role=MessageRole.SYSTEM, content=reformat_content)]
     context_template.extend(st.session_state.chat_messages[1:])
     context_template.append(ChatMessage(role=MessageRole.USER, content=user_prompt))
 
@@ -111,6 +141,7 @@ for chat in st.session_state.chat_messages:
 # Chat input for user to enter prompt
 if user_input := st.chat_input("Enter your chat prompt:"):
     # Add the user's message to chat history immediately
+    print(user_input)
     st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
     st.chat_message("user").write(user_input)
 
@@ -120,7 +151,9 @@ if user_input := st.chat_input("Enter your chat prompt:"):
     print(attached_pdf_text[:50])
     # Process user prompt
     contextualized_prompt = contextualize_prompt(full_prompt)
+    print("contextualized prompt: "  + contextualized_prompt)
     response_type = determine_response_type(contextualized_prompt)
+    print(response_type)
     
     # Retrieve answer based on response type
     if response_type == "direct_answer":
