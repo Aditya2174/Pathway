@@ -1,0 +1,3 @@
+[submodule "PathwayPS"]
+	path = PathwayPS
+	url = git@github.com:gunjitmittal/PathwayPS.git
