@@ -12,7 +12,7 @@ import pdfplumber
 import json
 
 # Initialize a Gemini-1.5-Flash model with LlamaIndex
-google_api_key = "AIzaSyAw786vp_FhAWxi9vce2IoHon53sGxeCdk"
+google_api_key = "AIzaSyDaEID5Rphn-1UxNHr2SeO7vdEdUUexvcE"
 if not os.environ.get('GOOGLE_API_KEY'):
     os.environ['GOOGLE_API_KEY'] = google_api_key
 

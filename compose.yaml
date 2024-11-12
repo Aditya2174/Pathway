@@ -1,0 +1,11 @@
+services:
+  server:
+    build: ./Docker/server
+    container_name: server
+    ports:
+      - "8756:8756"
+  web:
+    build: ./Docker/pipeline
+    container_name: pipeline
+    ports:
+      - "8501:8501"
