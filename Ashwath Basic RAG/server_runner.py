@@ -1,19 +1,19 @@
 import pathway as pw
 from pathway.xpacks.llm.vector_store import VectorStoreServer
 from sentence_transformers import SentenceTransformer
-from pathway.xpacks.llm.splitters import TokenCountSplitter
+from pathway.xpacks.llm.splitters import DefaultSentenceCountSplitter
 from pathway.xpacks.llm.embedders import SentenceTransformerEmbedder
 from pathway.xpacks.llm.parsers import ParseUnstructured
 
 # Pathway configuration
 model = SentenceTransformer('all-MiniLM-L6-v2')
-splitter = TokenCountSplitter(min_tokens=1, max_tokens=100)
+splitter = DefaultSentenceCountSplitter()
 embedder = SentenceTransformerEmbedder(model='all-MiniLM-L6-v2')
 parser = ParseUnstructured()
 
 # Initialize the Pathway Vector Store Server
 data_sources = pw.io.fs.read(
-    "./data",
+    "../data",
     format="binary",
     mode="streaming",
     with_metadata=True,

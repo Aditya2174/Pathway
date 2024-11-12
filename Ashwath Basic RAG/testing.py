@@ -8,6 +8,10 @@ from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.core.agent import ReActAgent
 from llama_index.tools.tavily_research import TavilyToolSpec
+<<<<<<< Updated upstream
+=======
+import pypdf
+>>>>>>> Stashed changes
 import pdfplumber
 import json
 
@@ -168,12 +172,38 @@ def extract_non_table_text(page):
 
     return non_table_text.strip()
 
+<<<<<<< Updated upstream
+def extract_non_table_text(page):
+    non_table_text = ""
+    # Extract tables to get their bounding boxes
+    tables = page.extract_tables()
+    table_bboxes = [table.bbox for table in page.find_tables()]
+
+    # Extract text boxes, filtering out any within table bounding boxes
+    for word in page.extract_words():
+        word_bbox = (word['x0'], word['top'], word['x1'], word['bottom'])
+        # Check if the word bounding box overlaps with any table bounding box
+        if not any((word_bbox[0] >= bbox[0] and word_bbox[1] >= bbox[1] and
+                    word_bbox[2] <= bbox[2] and word_bbox[3] <= bbox[3]) for bbox in table_bboxes):
+            non_table_text += word['text'] + " "
+
+    return non_table_text.strip()
+
+=======
+>>>>>>> Stashed changes
 # Document uploader for including document text in the chat prompt
 with st.sidebar:
     st.subheader("Upload Document")
     uploaded_file = st.file_uploader("Upload a .txt, .json, or .pdf document", type=["txt", "json", "pdf"])
     attached_text = ""
 
+<<<<<<< Updated upstream
+    st.subheader("Upload Document")
+    uploaded_file = st.file_uploader("Upload a .txt, .json, or .pdf document", type=["txt", "json", "pdf"])
+    attached_text = ""
+
+=======
+>>>>>>> Stashed changes
     if uploaded_file:
         if uploaded_file.type == "application/pdf":
             attached_pdf_text = ""
@@ -202,6 +232,36 @@ with st.sidebar:
         elif uploaded_file.type == "application/json":
             attached_text = json.dumps(json.load(uploaded_file), indent=2)
             st.success("JSON document loaded for context!")
+<<<<<<< Updated upstream
+        if uploaded_file.type == "application/pdf":
+            attached_pdf_text = ""
+            with pdfplumber.open(uploaded_file) as pdf:
+                for page in pdf.pages:
+                    # Extract non-table text using bounding box filtering
+                    non_table_text = extract_non_table_text(page)
+                    attached_pdf_text += non_table_text + "\n"
+
+                    # Optionally, add structured tables to attached_pdf_text
+                    tables = page.extract_tables()
+                    if tables:
+                        attached_pdf_text += "\n--- Table Data ---\n"
+                        for table in tables:
+                            for row in table:
+                                attached_pdf_text += " | ".join(cell if cell else "" for cell in row) + "\n"
+                        attached_pdf_text += "--- End of Table ---\n"
+
+            attached_text = attached_pdf_text
+            st.success("PDF parsed with non-table text extracted!")
+
+        elif uploaded_file.type == "text/plain":
+            attached_text = uploaded_file.read().decode("utf-8")
+            st.success("Text document loaded for context!")
+
+        elif uploaded_file.type == "application/json":
+            attached_text = json.dumps(json.load(uploaded_file), indent=2)
+            st.success("JSON document loaded for context!")
+=======
+>>>>>>> Stashed changes
 
 # Display the chat history
 for chat in st.session_state.chat_messages:
@@ -239,11 +299,19 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         print("Response type: " + response_type)
         
         response_type = 'needs_more_context'
+<<<<<<< Updated upstream
+        response_type = 'needs_more_context'
+=======
+>>>>>>> Stashed changes
         # Retrieve answer based on response type
         if response_type == "direct_answer":
             # context = retriever.retrieve(contextualized_prompt)
             # context_text = "\n".join([doc.text for doc in context])
             # final_prompt = f"Prompt: {contextualized_prompt}\nContext: {context_text}" 
+<<<<<<< Updated upstream
+            # final_prompt = f"Prompt: {contextualized_prompt}\nContext: {context_text}" 
+=======
+>>>>>>> Stashed changes
             
             # final_prompt = f"Prompt: {contextualized_prompt}"
             # Add the user's message to chat history
@@ -253,6 +321,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             # Get the model's response
             final_prompt = ChatPromptTemplate.from_messages(final_prompt).format_messages()
             response = gemini_pro_model.chat(final_prompt).message.content
+<<<<<<< Updated upstream
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
             st.session_state.reformulated_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
             st.chat_message("assistant").write(response)
@@ -276,3 +345,6 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
             st.session_state.reformulated_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
             st.chat_message("assistant").write(response)
+=======
+            st.session_state.chat_messag
+>>>>>>> Stashed changes
