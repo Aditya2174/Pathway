@@ -13,6 +13,7 @@ pillow-heif = "^0.20.0"
 numpy = "<2.0"
 matplotlib = "^3.9.2"
 unstructured-inference = "^0.8.1"
+pdfplumber = "^0.11.4"
 
 [tool.poetry.group.evaluations]
 optional = true

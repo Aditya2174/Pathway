@@ -1,45 +1,44 @@
 import pathway as pw
 from pathway.xpacks.llm.vector_store import VectorStoreServer
 from sentence_transformers import SentenceTransformer
-import asyncio
-import threading
 from pathway.xpacks.llm.splitters import TokenCountSplitter
-from pathway.xpacks.llm.embedders import BaseEmbedder , SentenceTransformerEmbedder
-from pathway.xpacks.llm.parsers import ParseUtf8, ParseUnstructured
+from pathway.xpacks.llm.embedders import SentenceTransformerEmbedder
+from pathway.xpacks.llm.parsers import ParseUnstructured
 
+# Pathway configuration
 model = SentenceTransformer('all-MiniLM-L6-v2')
+splitter = TokenCountSplitter(min_tokens=1, max_tokens=100)
+embedder = SentenceTransformerEmbedder(model='all-MiniLM-L6-v2')
+parser = ParseUnstructured()
 
+# Initialize the Pathway Vector Store Server
 data_sources = pw.io.fs.read(
-    "data/input.txt",
+    "./data",
     format="binary",
     mode="streaming",
     with_metadata=True,
 )
 
-
-splitter = TokenCountSplitter(min_tokens=1, max_tokens=100)
-embedder = SentenceTransformerEmbedder(model ='all-MiniLM-L6-v2')
-parser = ParseUnstructured() # must have libmagic in system to use this
-
+# Initializing a VectorStoreServer object
 vector_store_server = VectorStoreServer(
     data_sources,
     embedder=embedder,
     parser=parser,
     splitter=splitter,
-    # doc_post_processors=[remove_extra_whitespace],  # Optional
 )
 
-
+# Configuring the host and port
 PATHWAY_HOST = "127.0.0.1"
-PATHWAY_PORT = 8755
+PATHWAY_PORT = 8756
 
 def run_server():
     vector_store_server.run_server(
         host=PATHWAY_HOST,
         port=PATHWAY_PORT,
-        with_cache=False,  
-        threaded=False, 
+        with_cache=False,
+        threaded=True,
     )
 
+# Running the server
 if __name__ == "__main__":
     run_server()
