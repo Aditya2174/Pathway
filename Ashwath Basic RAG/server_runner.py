@@ -1,5 +1,6 @@
 import pathway as pw
 from pathway.xpacks.llm.vector_store import VectorStoreServer
+from vector_store import VectorStoreServer
 from sentence_transformers import SentenceTransformer
 from pathway.xpacks.llm.splitters import TokenCountSplitter
 from pathway.xpacks.llm.embedders import SentenceTransformerEmbedder
@@ -13,7 +14,7 @@ parser = ParseUnstructured()
 
 # Initialize the Pathway Vector Store Server
 data_sources = pw.io.fs.read(
-    "./data",
+    "../data",
     format="binary",
     mode="streaming",
     with_metadata=True,

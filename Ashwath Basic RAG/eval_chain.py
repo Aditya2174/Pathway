@@ -1,5 +1,6 @@
-import streamlit as st
 import os
+import pandas as pd
+import time
 from langchain_community.vectorstores.pathway import PathwayVectorClient
 from langchain_core.documents import Document
 from langchain.prompts.chat import ChatPromptTemplate
@@ -21,9 +22,8 @@ PATHWAY_HOST = "127.0.0.1"
 PATHWAY_PORT = 8755
 vector_client = PathwayVectorClient(host=PATHWAY_HOST, port=PATHWAY_PORT)
 
-# Use session state to initialize memory
-if 'memory' not in st.session_state:
-    st.session_state.memory = ConversationBufferMemory(memory_key="chat_history", input_key="user_prompt", return_messages=True)
+# Initialize memory
+memory = ConversationBufferMemory(memory_key="chat_history", input_key="user_prompt", return_messages=True)
 
 # Creating a search tool and configuring API settings
 tavily_api_key = "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"
@@ -46,9 +46,10 @@ def can_answer(user_prompt, attached_doc_text):
         HumanMessage(content=user_prompt)
     ]
     
-    final_prompt = ChatPromptTemplate.from_messages(template).format_prompt(**{"chat_history": st.session_state.memory.chat_memory.messages})
+    final_prompt = ChatPromptTemplate.from_messages(template).format_prompt(**{"chat_history": memory.chat_memory.messages})
     response = model.invoke(final_prompt).content.lower()
 
+    return "needs_more_context"
     if 'direct answer' in response:
         return "direct_answer"
     elif 'needs more context' in response:
@@ -56,40 +57,36 @@ def can_answer(user_prompt, attached_doc_text):
     else:
         return "standalone_question"
 
-st.title("Pathway RAG Application")
+def evaluate_pipeline(data_path, checkpoint_path='checkpoint.txt', results_path='evaluation_results.csv'):
+    df = pd.read_csv(data_path)
+    results = []
 
-# Document uploader - Main Vector Store
-with st.sidebar:
-    st.subheader("Upload Document to Vector Store")
-    uploaded_file = st.file_uploader("Upload a document", type=["txt", "json"])
-    if uploaded_file:
-        doc_text = uploaded_file.read().decode("utf-8")
-        document = Document(page_content=doc_text)
-        vector_client.add_documents([document])
-        st.success("Document added to the vector store!")
+    # Load checkpoint
+    if os.path.exists(checkpoint_path):
+        with open(checkpoint_path, 'r') as f:
+            start_index = int(f.read().strip())
+    else:
+        start_index = 0
 
-# Chat input with document option
-st.subheader("Chat with Pathway Vector Store")
-user_prompt = st.text_input("Enter your chat prompt:")
-include_doc = st.checkbox("Include document in chat prompt")
+    # Load previous results if they exist
+    if os.path.exists(results_path):
+        results_df = pd.read_csv(results_path)
+        results = results_df.to_dict('records')
 
-# Extracting text from attached document (if provided)
-attached_doc_text = None
-if include_doc:
-    attached_file = st.file_uploader("Attach document to prompt", type=["txt", "json"], key="attached_file")
-    if attached_file:
-        attached_doc_text = attached_file.read().decode("utf-8")
-        with open(os.path.join("secondary_docs", attached_file.name), "w") as f:
-            f.write(attached_doc_text)
-        st.success("Document attached and saved.")
+    counter = 0
 
-# Submit button logic
-if st.button("Submit"):
-    if user_prompt:
+    for index, row in df.iterrows():
+        if index < start_index:
+            continue
+
+        user_prompt = row['question']
+        attached_doc_text = row['context']
+        print(f"Evaluating row {index}...")
+        print(f"User Prompt: {user_prompt}")
         response_type = can_answer(user_prompt, attached_doc_text or "")
 
+        print(f"Response Type: {response_type}")
         if "direct answer" in response_type.lower():
-            st.write("Direct answer")
             full_prompt = user_prompt
             if attached_doc_text:
                 full_prompt += f"\n\nAttached Document: {attached_doc_text}"
@@ -101,27 +98,23 @@ if st.button("Submit"):
             ]
             chat_prompt_template = ChatPromptTemplate.from_messages(template)
 
-            # Format the prompt and get the response
-            formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": st.session_state.memory.chat_memory.messages})
+            formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": memory.chat_memory.messages})
             response = model.invoke(formatted_prompt).content
             final_response = agent.stream(formatted_prompt)
             stream_responses = [message for message in final_response]
 
             response_content = stream_responses[-1]['agent']['messages'][0].content
-            st.write(f"Final Response: {response_content}")
 
             # Update memory with the new user message and context
-            st.session_state.memory.chat_memory.add_message(HumanMessage(content=user_prompt))
-            st.session_state.memory.chat_memory.add_message(AIMessage(content=response_content))
+            memory.chat_memory.add_message(HumanMessage(content=user_prompt))
+            memory.chat_memory.add_message(AIMessage(content=response_content))
 
         elif "needs_more_context" in response_type.lower():
-            st.write("Needs more context")
             retriever = vector_client.as_retriever()
             context = retriever.invoke(user_prompt)
             
             content_list = [doc.page_content for doc in context]
-            st.write(f"Context: {content_list}")
-
+            retrieved = content_list
             full_prompt = f"{user_prompt}\n\nContext: {content_list}"
             if attached_doc_text:
                 full_prompt += f"\n\nAttached Document: {attached_doc_text}"
@@ -133,18 +126,16 @@ if st.button("Submit"):
             ]
             chat_prompt_template = ChatPromptTemplate.from_messages(template)
 
-            formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": st.session_state.memory.chat_memory.messages})
+            formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": memory.chat_memory.messages})
             final_response = agent.stream(formatted_prompt)
             stream_responses = [message for message in final_response]
 
             response_content = stream_responses[-1]['agent']['messages'][0].content
-            st.write(f"Final Response: {response_content}")
 
-            st.session_state.memory.chat_memory.add_message(HumanMessage(content=user_prompt))
-            st.session_state.memory.chat_memory.add_message(AIMessage(content=response_content))
+            memory.chat_memory.add_message(HumanMessage(content=user_prompt))
+            memory.chat_memory.add_message(AIMessage(content=response_content))
 
         else:  # standalone_question
-            st.write("Standalone question")
             full_prompt = user_prompt
             if attached_doc_text:
                 full_prompt += f"\n\nAttached Document: {attached_doc_text}"
@@ -155,16 +146,44 @@ if st.button("Submit"):
             ]
             chat_prompt_template = ChatPromptTemplate.from_messages(template)
 
-            # Format the prompt and get the response
-            formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": st.session_state.memory.chat_memory.messages})
+            formatted_prompt = chat_prompt_template.format_prompt(**{"chat_history": memory.chat_memory.messages})
             final_response = agent.stream(formatted_prompt)
             stream_responses = [message for message in final_response]
 
             response_content = stream_responses[-1]['agent']['messages'][0].content
-            st.write(f"Final Response: {response_content}")
 
-            st.session_state.memory.chat_memory.add_message(HumanMessage(content=user_prompt))
-            st.session_state.memory.chat_memory.add_message(AIMessage(content=response_content))
+            memory.chat_memory.add_message(HumanMessage(content=user_prompt))
+            memory.chat_memory.add_message(AIMessage(content=response_content))
 
-    else:
-        st.warning("Please enter a prompt for the chat!")
+        results.append({
+            'question': user_prompt,
+            'context': retrieved,
+            'response': response_content
+        })
+        print(f"Response: {response_content}")
+        print(f"Row {index} evaluated successfully.")
+        
+        counter += 1
+        if counter % 2 == 0:
+            result_df = pd.DataFrame(results)
+            result_df.to_csv(results_path, index=False, mode='a', header=not os.path.exists(results_path))
+            print(f"Intermediate results saved to '{results_path}'.")
+
+            # Save checkpoint
+            with open(checkpoint_path, 'w') as f:
+                f.write(str(index + 1))
+
+            print(f"Checkpoint saved at row {index + 1}.")
+            time.sleep(1)  # Sleep for 1 second after every 2 questions
+
+    result_df = pd.DataFrame(results)
+    result_df.to_csv(results_path, index=False, mode='a', header=not os.path.exists(results_path))
+    print(f"Evaluation completed. Results saved to '{results_path}'.")
+
+    # Remove checkpoint file after completion
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
+
+# Example usage
+data_path = 'data.csv'
+evaluate_pipeline(data_path)
