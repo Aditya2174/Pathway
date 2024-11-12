@@ -16,11 +16,9 @@ It can serve as a foundation for a better pipeline, as Pathway's integration wit
 Instructions on installations of libraries needed for testing.py
 Use an Anaconda venv
 1. pip install "pathway[all]"
-2. pip install llama-index
-3. pip install llama-index-tools-tavily-research
-4. pip install llama-index-llms-gemini
-5. pip install streamlit
-6. pip install spacy
-7. pip install sentence-transformers
+2. pip install llama-index llama-index-tools-tavily-research llama-index-llms-gemini
+3. pip install streamlit
+4. pip install spacy
+5. pip install sentence-transformers
 
 If any errors persist, reading them will suggest what is pending and needs to be installed.
