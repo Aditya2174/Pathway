@@ -16,6 +16,8 @@ services:
       - base_image
     networks:
       - app_network
+    volumes:
+      - ./data:/app/data
 
   client:
     build:
