@@ -1,13 +1,13 @@
 import pathway as pw
 from pathway.xpacks.llm.vector_store import VectorStoreServer
 from sentence_transformers import SentenceTransformer
-from pathway.xpacks.llm.splitters import TokenCountSplitter
+from pathway.xpacks.llm.splitters import DefaultSentenceCountSplitter
 from pathway.xpacks.llm.embedders import SentenceTransformerEmbedder
 from pathway.xpacks.llm.parsers import ParseUnstructured
 
 # Pathway configuration
 model = SentenceTransformer('all-MiniLM-L6-v2')
-splitter = TokenCountSplitter(min_tokens=1, max_tokens=100)
+splitter = DefaultSentenceCountSplitter()
 embedder = SentenceTransformerEmbedder(model='all-MiniLM-L6-v2')
 parser = ParseUnstructured()
 
@@ -28,7 +28,7 @@ vector_store_server = VectorStoreServer(
 )
 
 # Configuring the host and port
-PATHWAY_HOST = "127.0.0.1"
+PATHWAY_HOST = "0.0.0.0"
 PATHWAY_PORT = 8756
 
 def run_server():
@@ -36,7 +36,7 @@ def run_server():
         host=PATHWAY_HOST,
         port=PATHWAY_PORT,
         with_cache=False,
-        threaded=True,
+        threaded=False,
     )
 
 # Running the server

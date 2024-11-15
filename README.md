@@ -1,50 +1,31 @@
-# Managing the PathwayPS package
+# Setting up the env for the project
 
-This is added as git submodule to the main repository. To setup the repository with the submodule, use the following command:
+Make sure you have poetry installed. If not, install it using the following command
 ```bash
-git submodule init
-git submodule update
+pip install poetry
 ```
 
-After the setup, to update the submodule to the latest version, use the following command:
-```bash
-git submodule update --remote
-```
-
-Any changes to the submodule needs to be pushed from within the submodule directory.
-
-# Using poetry to manage the package
-
-The basic packages are kept in the default group which can be installed using 
-```bash 
-poetry install
-```
-Adding a new package to the default group can be done using 
-```bash
-poetry add <package-name>
-```
-
-## Using groups in poetry
-
-For experimentation and testing, new groups can be create within the pyproject.toml file. For reference, I have added evaluation group for testing purposes. The packages in the evaluation group can be installed using. For groups deemed necesseary you can set optional as false in the pyproject.toml file.
-```bash
-poetry install --with evaluations
-```
-To add dependencies to the evaluation group, use the following command
-```bash
-poetry add pytest --group evaluations
-```
-For more information on groups, refer to the [official documentation](https://python-poetry.org/docs/managing-dependencies/)
-
-
-# Setting up local pathway
-
-Firstly install everything except pathway using poetry with the following command
+Next install everything except pathway using poetry with the following command
 ```bash
 poetry install --without pathway
 ```
 
 Then install the local version of pathway using 
 ```bash
-pip install -e .
+pip install -e PathwayPS
 ```
+
+# Running the project
+First run the server using the following command from the root directory
+```bash
+python src/server.py
+```
+
+Then run the client using the following command in a separate terminal
+```bash
+python src/pipeline.py
+```
+This command will run a streamlit interface that will allow you to interact with our solution.
+
+# Setting up the data
+The data is stored in the data folder. You can add the files into the data folder and the pipeline will automatically pick them up. Alternatively you can also 

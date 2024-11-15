@@ -10,17 +10,17 @@ from llama_index.core.agent import ReActAgent
 from llama_index.tools.tavily_research import TavilyToolSpec
 import pdfplumber
 import json
+from dotenv import load_dotenv
+load_dotenv()
 
 # Initialize a Gemini-1.5-Flash model with LlamaIndex
-google_api_key = "AIzaSyDaEID5Rphn-1UxNHr2SeO7vdEdUUexvcE"
-if not os.environ.get('GOOGLE_API_KEY'):
-    os.environ['GOOGLE_API_KEY'] = google_api_key
+google_api_key = os.environ.get("GOOGLE_API_KEY", "AIzaSyDaEID5Rphn-1UxNHr2SeO7vdEdUUexvcE")
 
 gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)
 gemini_pro_model = Gemini(model='models/gemini-1.5-pro', api_key=google_api_key)
 
 # Pathway server configuration
-PATHWAY_HOST = "127.0.0.1"
+PATHWAY_HOST = "server"
 PATHWAY_PORT = 8756
 
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT)
@@ -30,9 +30,7 @@ if 'context' not in st.session_state:
     st.session_state.context = ChatMemoryBuffer(token_limit=500000)
 
 # Tavily search tool setup
-tavily_api_key = "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"
-if not os.environ.get('TAVILY_API_KEY'):
-    os.environ['TAVILY_API_KEY'] = tavily_api_key
+tavily_api_key = os.environ.get('TAVILY_API_KEY', "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")
 search_tool = TavilyToolSpec(api_key=tavily_api_key)
 search_tool = search_tool.to_tool_list()
 
