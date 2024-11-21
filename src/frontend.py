@@ -1,7 +1,6 @@
 # Necessary imports
 import streamlit as st
 import os
-from concurrent.futures import ProcessPoolExecutor
 from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.prompts import ChatPromptTemplate
@@ -12,6 +11,23 @@ from llama_index.tools.tavily_research import TavilyToolSpec
 import pdfplumber
 import json
 from transformers import pipeline
+import shutil
+import diskcache as dc
+import atexit
+
+# Cache directory setup using diskcache
+cache_dir = './document_cache'
+
+# Initialize the cache using diskcache
+document_cache = dc.Cache(cache_dir)
+
+# Register cleanup function to delete cache on termination
+def cleanup_cache():
+    if os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        print(f"Cache directory '{cache_dir}' cleaned up.")
+
+atexit.register(cleanup_cache)
 
 # Initialize a Gemini-1.5-Flash model with LlamaIndex
 google_api_key = "AIzaSyAv4nC5249yC5YgB_skyL4MiDeM5fDJGjI"
@@ -27,7 +43,7 @@ PATHWAY_PORT = 8756
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT)
 
 # Summarization pipeline
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")
 
 # Initialize memory if not already in session state
 if 'context' not in st.session_state:
@@ -38,6 +54,8 @@ if 'summarized_history' not in st.session_state:
     st.session_state.summarized_history = ""
 if 'message_counter' not in st.session_state:
     st.session_state.message_counter = 0
+if 'summarizer' not in st.session_state:
+    st.session_state.summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")
 
 # Tavily search tool setup
 tavily_api_key = "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"
@@ -104,39 +122,25 @@ Only return the Output. Do not answer the User Query. Only answer with 'context'
 # Initializing a simple agent with a search tool
 agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
 
-# Function to summarize chat history
-# def summarize_history(messages):
-#     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
-#     if len(history_text) > 1000:  # Optional length threshold
-#         summary = summarizer(history_text, max_length=150, min_length=50, do_sample=False)[0]['summary_text']
-#         return summary
-#     return history_text
+def summarize_history(messages):
+    history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
+
+    # Use cached summarizer for processing
+    summarizer = st.session_state.summarizer
+
+    # No need to split if text is short
+    if len(history_text) <= 1000:
+        return summarizer(history_text, max_length=150, min_length=50, do_sample=False)[0]['summary_text']
+
+    # Handle longer texts by splitting
+    chunks = chunk_text(history_text, chunk_size=1000)  # Use an optimized chunk size
+    summaries = [summarizer(chunk, max_length=150, min_length=50, do_sample=False)[0]['summary_text'] for chunk in chunks]
+    return " ".join(summaries)
 
 def chunk_text(text, chunk_size):
     """Split text into smaller chunks for parallel processing."""
     words = text.split()
     return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
-
-def summarize_chunk(chunk):
-    """Summarize a single chunk of text."""
-    return summarizer(chunk, max_length=150, min_length=50, do_sample=False)[0]['summary_text']
-
-def summarize_history_parallel(messages):
-    history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
-    
-    # Check if summarization is needed
-    if len(history_text) <= 1000:
-        return history_text
-
-    # Split history into chunks
-    chunks = chunk_text(history_text, chunk_size=1000)  # Chunk size in words
-
-    # Use ProcessPoolExecutor for parallel summarization
-    with ProcessPoolExecutor() as executor:
-        summaries = list(executor.map(summarize_chunk, chunks))
-
-    # Combine summarized chunks
-    return " ".join(summaries)
 
 # Function to reformat user's prompt with history as context
 def contextualize_prompt(user_prompt):
@@ -183,13 +187,18 @@ with st.sidebar:
 
     if uploaded_file:
         if uploaded_file.type == "application/pdf":
-            attached_pdf_text = ""
-            with pdfplumber.open(uploaded_file) as pdf:
-                for page in pdf.pages:
-                    non_table_text = extract_non_table_text(page)
-                    attached_pdf_text += non_table_text + "\n"
-            attached_text = attached_pdf_text
-            st.success("PDF parsed!")
+            if uploaded_file.name in document_cache:
+                attached_text = document_cache[uploaded_file.name]
+                st.success(f"Loaded cached document: {uploaded_file.name}")
+            else:
+                attached_pdf_text = ""
+                with pdfplumber.open(uploaded_file) as pdf:
+                    for page in pdf.pages:
+                        non_table_text = extract_non_table_text(page)
+                        attached_pdf_text += non_table_text + "\n"
+                attached_text = attached_pdf_text
+                st.success("PDF parsed!")
+            
         elif uploaded_file.type == "text/plain":
             attached_text = uploaded_file.read().decode("utf-8")
             st.success("Text document loaded!")
@@ -210,7 +219,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
     # Summarize history periodically
     if st.session_state.message_counter % 4 == 0:
-        st.session_state.summarized_history = summarize_history_parallel(st.session_state.chat_messages)
+        st.session_state.summarized_history = summarize_history(st.session_state.chat_messages)
         st.session_state.chat_messages = [
             ChatMessage(role=MessageRole.ASSISTANT, content=st.session_state.summarized_history)
         ]
@@ -220,13 +229,15 @@ if user_input := st.chat_input("Enter your chat prompt:"):
     contextualized_prompt = contextualize_prompt(user_input)
 
     if 'general' in contextualized_prompt:
-    # Provide response directly for 'general' queries
-        st.chat_message("assistant").write(contextualized_prompt)
-        st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=contextualized_prompt))
+        # Provide response directly for 'general' queries
+        assistant_response = contextualized_prompt.split("Output:")[-1].strip()
+        st.chat_message("assistant").write(assistant_response)
+        st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
     else:
         response_type = determine_response_type(contextualized_prompt)
 
         if response_type == "direct":
+            print("Direct")
             system_prompt = "Respond concisely and accurately, using the conversation provided as context."
             # Provide history, system prompt, and the user's reformulated query
             final_prompt = [
@@ -239,6 +250,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
 
         elif response_type == "context":
+            print("Context")
             system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
             # Retrieve additional context
             context = retriever.retrieve(contextualized_prompt)
