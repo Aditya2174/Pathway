@@ -53,7 +53,7 @@ PATHWAY_PORT = 8756
 
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT)
 
-summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")  # Summarization pipeline
+# summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")  # Summarization pipeline
 
 # Initialize session variables
 if 'chat_messages' not in st.session_state:
