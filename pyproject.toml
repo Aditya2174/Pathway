@@ -21,6 +21,7 @@ llama-index-llms-gemini = "^0.3.7"
 llama-index-tools-tavily-research = "^0.2.0"
 llama-index-core = "^0.11.23"
 autogen = "^0.4"
+einops = "^0.8.0"
 
 [tool.poetry.group.pathway]
 optional = true
