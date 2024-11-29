@@ -1,24 +1,33 @@
-# Necessary imports
+# Streamlit for UI
 import streamlit as st
+
+# For file-related purposes
 import os
-from llama_index.llms.gemini import Gemini
-from llama_index.retrievers.pathway import PathwayRetriever
-from llama_index.core.prompts import ChatPromptTemplate
-from llama_index.core.memory import ChatMemoryBuffer
-from llama_index.core.llms import ChatMessage, MessageRole
-from llama_index.core.agent import ReActAgent
-from llama_index.tools.tavily_research import TavilyToolSpec
-import pdfplumber
-import json
-from transformers import pipeline
 import shutil
 import diskcache as dc
 import atexit
+import json
+import tempfile
+import pdfplumber
+import pandas as pd
+
+# All LlamaIndex tools needed...LLM, memory, roles, etc
+from llama_index.llms.gemini import Gemini
+from llama_index.retrievers.pathway import PathwayRetriever
+from llama_index.core.prompts import ChatPromptTemplate
+from llama_index.core.llms import ChatMessage, MessageRole
+from llama_index.core.agent import ReActAgent
+from llama_index.tools.tavily_research import TavilyToolSpec
+
+# Autogen agents
+from autogen import ConversableAgent
+from autogen.coding import LocalCommandLineCodeExecutor
+
+# Summarizer of history
+from transformers import pipeline
 
 # Cache directory setup using diskcache
 cache_dir = './document_cache'
-
-# Initialize the cache using diskcache
 document_cache = dc.Cache(cache_dir)
 
 # Register cleanup function to delete cache on termination
@@ -28,6 +37,8 @@ def cleanup_cache():
         print(f"Cache directory '{cache_dir}' cleaned up.")
 
 atexit.register(cleanup_cache)
+
+temp_dir = tempfile.TemporaryDirectory()
 
 # Initialize a Gemini-1.5-Flash model with LlamaIndex
 google_api_key = "AIzaSyAv4nC5249yC5YgB_skyL4MiDeM5fDJGjI"
@@ -42,12 +53,9 @@ PATHWAY_PORT = 8756
 
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT)
 
-# Summarization pipeline
-summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")
+summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")  # Summarization pipeline
 
-# Initialize memory if not already in session state
-if 'context' not in st.session_state:
-    st.session_state.context = ChatMemoryBuffer(token_limit=500000)
+# Initialize session variables
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
 if 'summarized_history' not in st.session_state:
@@ -56,6 +64,8 @@ if 'message_counter' not in st.session_state:
     st.session_state.message_counter = 0
 if 'summarizer' not in st.session_state:
     st.session_state.summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")
+if 'df' not in st.session_state:
+    st.session_state.df = None
 
 # Tavily search tool setup
 tavily_api_key = "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"
@@ -122,6 +132,11 @@ Only return the Output. Do not answer the User Query. Only answer with 'context'
 # Initializing a simple agent with a search tool
 agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
 
+agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
+executor = LocalCommandLineCodeExecutor(work_dir=temp_dir.name)
+path_decider = ConversableAgent(name="code_executor", human_input_mode="ALWAYS", system_message=agent_system_prompt,
+                                llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY")}]})
+
 def summarize_history(messages):
     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
 
@@ -168,7 +183,7 @@ def determine_response_type(user_prompt):
 
 def extract_non_table_text(page):
     non_table_text = ""
-    tables = page.extract_tables()
+
     table_bboxes = [table.bbox for table in page.find_tables()]
 
     for word in page.extract_words():
@@ -182,10 +197,12 @@ def extract_non_table_text(page):
 # Document uploader for including document text in the chat prompt
 with st.sidebar:
     st.subheader("Upload Document")
-    uploaded_file = st.file_uploader("Upload a .txt, .json, or .pdf document", type=["txt", "json", "pdf"])
+    uploaded_file = st.file_uploader("Upload a .txt, .json, .csv or .pdf document", type=["txt", "json", "pdf", "csv"])
     attached_text = ""
 
     if uploaded_file:
+        file_size = uploaded_file.size
+
         if uploaded_file.type == "application/pdf":
             if uploaded_file.name in document_cache:
                 attached_text = document_cache[uploaded_file.name]
@@ -196,6 +213,14 @@ with st.sidebar:
                     for page in pdf.pages:
                         non_table_text = extract_non_table_text(page)
                         attached_pdf_text += non_table_text + "\n"
+                        # Modify to handle multiple tables effectively
+                        tables = page.extract_tables()
+                        if tables:
+                            attached_pdf_text += "\n--- Table Data ---\n"
+                            for table in tables:
+                                for row in table:
+                                    attached_pdf_text += " | ".join(cell if cell else "" for cell in row) + "\n"
+                            attached_pdf_text += "--- End of Table ---\n"     
                 attached_text = attached_pdf_text
                 st.success("PDF parsed!")
             
@@ -205,6 +230,35 @@ with st.sidebar:
         elif uploaded_file.type == "application/json":
             attached_text = json.dumps(json.load(uploaded_file), indent=2)
             st.success("JSON document loaded!")
+        elif uploaded_file.type == "text/csv":
+            # Size threshold in bytes (e.g., 5 MB)
+            size_threshold = 5 * 1024 * 1024  # 5 MB
+            
+            if file_size <= size_threshold:
+                # Directly parse smaller CSV files
+                df = pd.read_csv(uploaded_file)
+                attached_text = df.to_string(index=False)  # Convert DataFrame to string
+                st.success("Small CSV loaded and parsed!")
+            else:
+                # Process larger CSV files with derived insights
+                df = pd.read_csv(uploaded_file)
+                
+                # Generate summary of the data
+                summary_info = f"""
+                File Size: {file_size / (1024 * 1024):.2f} MB
+                Number of Rows: {df.shape[0]}
+                Number of Columns: {df.shape[1]}
+                Columns: {', '.join(df.columns)}
+                """
+                attached_text = summary_info
+                
+                st.success("Large CSV loaded! Showing summary:")
+                st.text(summary_info)
+                
+                st.write("Preview of Data:")
+                st.dataframe(df.head(10))  # Show top 10 rows
+
+                st.session_state.df = df
 
 # Display the chat history
 for chat in st.session_state.chat_messages:
@@ -219,14 +273,16 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
     # Summarize history periodically
     if st.session_state.message_counter % 4 == 0:
-        st.session_state.summarized_history = summarize_history(st.session_state.chat_messages)
-        st.session_state.chat_messages = [
-            ChatMessage(role=MessageRole.ASSISTANT, content=st.session_state.summarized_history)
-        ]
-        st.success("Chat history summarized!")
+        with st.spinner(text="Summarizing history..."):
+            st.session_state.summarized_history = summarize_history(st.session_state.chat_messages)
+            st.session_state.chat_messages = [
+                ChatMessage(role=MessageRole.ASSISTANT, content=st.session_state.summarized_history)
+            ]
+            st.success("Chat history summarized!")
 
     full_prompt = f"{user_input}\n\nAttached Document: {attached_text}" if attached_text else user_input
-    contextualized_prompt = contextualize_prompt(user_input)
+    with st.spinner("Analyzing user query..."):
+        contextualized_prompt = contextualize_prompt(user_input)
 
     if 'general' in contextualized_prompt:
         # Provide response directly for 'general' queries
@@ -245,7 +301,8 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 *st.session_state.chat_messages,
                 ChatMessage(role=MessageRole.USER, content=st.session_state.summarized_history)
             ]
-            response = gemini_model.chat(ChatPromptTemplate.from_messages(final_prompt).format_messages()).message.content
+            # response = gemini_model.chat(ChatPromptTemplate.from_messages(final_prompt).format_messages()).message.content
+            response = gemini_model.chat(final_prompt).message.content
             st.chat_message("assistant").write(response)
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
 
@@ -262,6 +319,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 ChatMessage(role=MessageRole.USER, content=f"User Query: {contextualized_prompt}"),
                 ChatMessage(role=MessageRole.SYSTEM, content=f"Use the following context:\n{context_text}")
             ]
-            response = agent.chat(message=ChatPromptTemplate.from_messages(final_prompt).format_messages()).response
+            # response = agent.chat(message=ChatPromptTemplate.from_messages(final_prompt).format_messages()).response
+            response = agent.chat(message=f"User query: {contextualized_prompt}\n Use the following context: {context_text}", chat_history=st.session_state.chat_messages).response
             st.chat_message("assistant").write(response)
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
