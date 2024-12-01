@@ -16,11 +16,13 @@ from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.prompts import ChatPromptTemplate
 from llama_index.core.llms import ChatMessage, MessageRole
+from utils import process_user_query, get_colored_text
 from llama_index.core.agent import ReActAgent
 from llama_index.tools.tavily_research import TavilyToolSpec
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
 from llama_index.embeddings.google import GeminiEmbedding
+import torch
 
 # Autogen agents
 from autogen import ConversableAgent
@@ -28,6 +30,15 @@ from autogen.coding import LocalCommandLineCodeExecutor
 
 # Summarizer of history
 from transformers import pipeline
+
+## Constants/Configurations
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Number of messages after which chat history is summarized
+SUMMARIZE_AFTER = 10
+SMALL_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024  # 5 MB
+# Pathway server configuration
+PATHWAY_HOST = "127.0.0.1"
+PATHWAY_PORT = 8756
 
 # Cache directory setup using diskcache
 cache_dir = './document_cache'
@@ -50,23 +61,19 @@ if not os.environ.get('GOOGLE_API_KEY'):
 
 gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)
 
-# Pathway server configuration
-PATHWAY_HOST = "127.0.0.1"
-PATHWAY_PORT = 8756
-
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT)
-
-# summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")  # Summarization pipeline
 
 # Initialize session variables
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
+if 'chat_messages_display' not in st.session_state:
+    st.session_state.chat_messages_display = []
 if 'summarized_history' not in st.session_state:
     st.session_state.summarized_history = ""
 if 'message_counter' not in st.session_state:
     st.session_state.message_counter = 0
 if 'summarizer' not in st.session_state:
-    st.session_state.summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")
+    st.session_state.summarizer = pipeline("summarization", device=device, model="facebook/bart-large-cnn")
 if 'df' not in st.session_state:
     st.session_state.df = None
 if 'uploaded_docs' not in st.session_state:
@@ -111,30 +118,6 @@ def chunk_text(text, chunk_size):
     """Split text into smaller chunks for parallel processing."""
     words = text.split()
     return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
-
-# Function to reformat user's prompt with history as context
-def contextualize_prompt(user_prompt):
-    context_template = [ChatMessage(role=MessageRole.SYSTEM, content=reformat_content)]
-    context_template.extend(st.session_state.chat_messages)
-    context_template.append(ChatMessage(role=MessageRole.USER, content=user_prompt))
-
-    reformat_prompt = ChatPromptTemplate.from_messages(context_template).format_messages()
-    response = gemini_model.chat(messages=reformat_prompt).message.content
-    return response
-
-# Identifying whether retrieval is needed
-def determine_response_type(user_prompt):
-    analysis_template = [ChatMessage(role=MessageRole.SYSTEM, content=response_type_content)]
-    analysis_template.extend(st.session_state.chat_messages)
-    analysis_template.append(ChatMessage(role=MessageRole.USER, content=user_prompt))
-
-    analysis_template = ChatPromptTemplate.from_messages(analysis_template).format_messages()
-    response = gemini_model.chat(analysis_template).message.content.lower()
-
-    if 'direct' in response:
-        return "direct"
-    elif 'context' in response:
-        return "context"
 
 def extract_non_table_text(page):
     non_table_text = ""
@@ -187,9 +170,8 @@ with st.sidebar:
             st.success("JSON document loaded!")
         elif uploaded_file.type == "text/csv":
             # Size threshold in bytes (e.g., 5 MB)
-            size_threshold = 5 * 1024 * 1024  # 5 MB
             
-            if file_size <= size_threshold:
+            if file_size <= SMALL_FILE_SIZE_THRESHOLD:
                 # Directly parse smaller CSV files
                 df = pd.read_csv(uploaded_file)
                 attached_text = df.to_string(index=False)  # Convert DataFrame to string
@@ -225,83 +207,103 @@ with st.sidebar:
         st.success(f"Document '{uploaded_file.name}' added to the secondary vector store!")
 
 # Display the chat history
-for chat in st.session_state.chat_messages:
+for chat in st.session_state.chat_messages_display:
     role = "assistant" if chat.role == MessageRole.ASSISTANT else "user"
-    st.chat_message(role).write(chat.content)
+    with st.chat_message(role):
+        st.markdown(chat.content, unsafe_allow_html=True)
 
 # Chat input for user to enter prompt
 if user_input := st.chat_input("Enter your chat prompt:"):
     st.session_state.message_counter += 1
-    st.chat_message("user").write(user_input)
-    st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-    # Summarize history periodically
-    if st.session_state.message_counter % 4 == 0:
-        with st.spinner(text="Summarizing history..."):
-            st.session_state.summarized_history = summarize_history(st.session_state.chat_messages)
-            st.session_state.chat_messages = [
-                st.session_state.chat_messages[0],
-                ChatMessage(role=MessageRole.ASSISTANT, content=st.session_state.summarized_history)
-            ]
-            st.success("Chat history summarized!")
+    with st.chat_message("assistant"):
+        # Summarize history periodically
+        if st.session_state.message_counter % SUMMARIZE_AFTER == 0:
+            with st.spinner(text="Summarizing history..."):
+                st.session_state.summarized_history = summarize_history(st.session_state.chat_messages)
+                st.session_state.chat_messages = [
+                    st.session_state.chat_messages[0],
+                    ChatMessage(role=MessageRole.ASSISTANT, content=st.session_state.summarized_history)
+                ]
+                st.success("Chat history summarized!")
 
-    full_prompt = f"{user_input}\n\nAttached Document: {attached_text}" if attached_text else user_input
-    with st.spinner("Analyzing user query..."):
-        contextualized_prompt = contextualize_prompt(user_input)
+        full_prompt = f"{user_input}\n\nAttached Document: {attached_text}" if attached_text else user_input
+        with st.spinner("Analyzing user query..."):
+            # contextualized_prompt = contextualize_prompt(user_input)
+            document_txt = attached_text if attached_text else ""
+            query_type, preprocess_op = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
 
-    if 'general' in contextualized_prompt:
-        # Provide response directly for 'general' queries
-        print('General')
-        assistant_response = contextualized_prompt.split("Output:")[-1].strip()
-        st.chat_message("assistant").write(assistant_response)
-        st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
-    else:
-        response_type = determine_response_type(contextualized_prompt)
+        if 'general' in query_type:
+            # Provide response directly for 'general' queries
+            print('Query Type: General')
+            st.markdown(preprocess_op)
+            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
+            st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=user_input))
+            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=preprocess_op))
+            st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.ASSISTANT, content=preprocess_op))
+        else:
+            green_txt_reform = get_colored_text(preprocess_op)
+            st.markdown(green_txt_reform, unsafe_allow_html=True)
 
-        if response_type == "direct":
-            print("Direct")
-            
-            if attached_text:
-                # Modify the last message in the session state to include document context
-                last_message = st.session_state.chat_messages[-1]
-                last_message.content = f"{last_message['content']}\n\nAttached Document Context:\n{attached_text}"
+            display_msg = user_input + "<br>" + green_txt_reform
 
-           
-            formatted_messages = [
-                {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                for msg in st.session_state.chat_messages
-            ]
-            auto_reply = auto_agent.generate_reply(messages=formatted_messages)
+            st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=display_msg))
+            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=preprocess_op))
+            if 'direct' in query_type:
+                print("Query Type: Direct")
+                
+                if attached_text:
+                    # Modify the last message in the session state to include document context
+                    last_message = st.session_state.chat_messages[-1]
+                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{attached_text}"
 
-            st.chat_message("assistant").write(auto_reply['content'])
-            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=auto_reply['content']))
-            
-        elif response_type == "context":
-            print("Context")
-            system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
-            # Retrieve additional context
-            context = retriever.retrieve(contextualized_prompt)
-            context_text = "\n".join([doc.text for doc in context])
+                formatted_messages = [
+                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
+                    for msg in st.session_state.chat_messages
+                ]
+                auto_reply = auto_agent.generate_reply(messages=formatted_messages)
 
-            sec_retriever = st.session_state.sec_store.as_retriever()
-            context = sec_retriever.retrieve(contextualized_prompt)
-            sec_context_text = "\n".join([doc.text for doc in context])
+                st.markdown(auto_reply['content'])
+                st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=auto_reply['content']))
+                st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.ASSISTANT, content=auto_reply['content']))
 
-            combined_context_text = f"Context from database:\n{context_text}\n\nContext from document uploaded by user:\n{sec_context_text}"
-            print(combined_context_text)
-            # Prepare the input for the ConversableAgent
-            formatted_messages = [
-                {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                for msg in st.session_state.chat_messages[:-1]
-            ]
+            elif 'context' in query_type:
+                print("Query Type: Context")
+                system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
+                contextualized_prompt = preprocess_op
+                # Retrieve additional context
+                context = retriever.retrieve(contextualized_prompt)
+                context_text = "\n".join([doc.text for doc in context])
 
-            # Include context and the reformulated query
-            formatted_messages.append({"role": "user", "content": f"{contextualized_prompt}\nContext:\n{context_text}"})
+                sec_retriever = st.session_state.sec_store.as_retriever()
+                context = sec_retriever.retrieve(contextualized_prompt)
+                sec_context_text = "\n".join([doc.text for doc in context])
 
-            # Generate a response using the ConversableAgent
-            response = auto_agent.generate_reply(messages=formatted_messages)
-            assistant_response = response['content']
+                combined_context_text = f"Context from database:\n{context_text}\n\nContext from document uploaded by user:\n{sec_context_text}"
+                print(combined_context_text)
+                # Prepare the input for the ConversableAgent
+                formatted_messages = [
+                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
+                    for msg in st.session_state.chat_messages[:-1]
+                ]
 
-            # Display the response
-            st.chat_message("assistant").write(assistant_response)
-            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
+                # Include context and the reformulated query
+                formatted_messages.append({"role": "user", "content": f"{contextualized_prompt}\nContext:\n{context_text}"})
+
+                # Generate a response using the ConversableAgent
+                response = auto_agent.generate_reply(messages=formatted_messages)
+                assistant_response = response['content']
+
+                # Display the response
+                st.markdown(assistant_response)
+                st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
+                st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
+
+            else:
+                print("Invalid response type detected:", query_type)
+                st.error("Invalid response type detected. Please try again.")
+
+    print(st.session_state.chat_messages)
+    st.rerun()

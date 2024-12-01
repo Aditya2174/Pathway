@@ -1,6 +1,3 @@
-from llama_index.core import PromptTemplate
-from datetime import datetime
-
 reformulation_type_prompt = """You are an intelligent AI assistant. The current date in YYYY-MM-DD format is {current_date}. You will be provided with:
 1. Chat history between the user and the chatbot.
 2. A user-uploaded document, which might be a summary of a larger document rather than the complete document.
@@ -70,7 +67,3 @@ User Uploaded Document:
 {document}
 User Query: {user_query}
 """
-
-def get_reformulation_type_prompt(llm, chat_history, document, user_query):
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    print(chat_history)
