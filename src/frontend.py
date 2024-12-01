@@ -18,6 +18,9 @@ from llama_index.core.prompts import ChatPromptTemplate
 from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.core.agent import ReActAgent
 from llama_index.tools.tavily_research import TavilyToolSpec
+from llama_index.core.indices import VectorStoreIndex
+from llama_index.core import Document
+from llama_index.embeddings.google import GeminiEmbedding
 
 # Autogen agents
 from autogen import ConversableAgent
@@ -66,6 +69,13 @@ if 'summarizer' not in st.session_state:
     st.session_state.summarizer = pipeline("summarization", device='cuda', model="facebook/bart-large-cnn")
 if 'df' not in st.session_state:
     st.session_state.df = None
+if 'uploaded_docs' not in st.session_state:
+    st.session_state.uploaded_docs = []
+if 'sec_embedder' not in st.session_state:
+    st.session_state.sec_embedder = GeminiEmbedding(model_name='models/embedding-001')
+if 'sec_store' not in st.session_state:
+    # st.session_state.sec_store = VectorStoreIndex(embed_model=st.session_state.sec_embedder).from_documents(st.session_state.uploaded_docs)
+    st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 
 # Tavily search tool setup
 tavily_api_key = "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"
@@ -107,6 +117,7 @@ Output: What is the capital of France?
 
 Only return the Query Type and Output. Do not answer the User Query. Only refactor the query to better represent the chat history and context.
 """
+
 response_type_content = """
 You are an intelligent AI assistant. You will be provided with a user query and the chat history between the user and the chatbot. You will have to identify how to answer the query, give your output according to following rules:
 - If the history has enough data for answering the query and you can answer it confidently wihtout relying on external context. Respond with "direct"
@@ -134,8 +145,8 @@ agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
 
 agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
 executor = LocalCommandLineCodeExecutor(work_dir=temp_dir.name)
-path_decider = ConversableAgent(name="code_executor", human_input_mode="ALWAYS", system_message=agent_system_prompt,
-                                llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY")}]})
+auto_agent = ConversableAgent(name="code_executor", human_input_mode="NEVER", system_message=agent_system_prompt,
+                                llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]})
 
 def summarize_history(messages):
     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
@@ -260,6 +271,15 @@ with st.sidebar:
 
                 st.session_state.df = df
 
+        # Add the parsed text as a Document for secondary vector store
+        doc = Document(text=attached_text, metadata={"filename": uploaded_file.name})
+        st.session_state.uploaded_docs.append(doc)
+
+        # Update secondary vector store with new document
+        st.session_state.uploaded_docs.append(doc)
+        st.session_state.sec_store = VectorStoreIndex.from_documents(st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
+        st.success(f"Document '{uploaded_file.name}' added to the secondary vector store!")
+
 # Display the chat history
 for chat in st.session_state.chat_messages:
     role = "assistant" if chat.role == MessageRole.ASSISTANT else "user"
@@ -276,6 +296,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         with st.spinner(text="Summarizing history..."):
             st.session_state.summarized_history = summarize_history(st.session_state.chat_messages)
             st.session_state.chat_messages = [
+                st.session_state.chat_messages[0],
                 ChatMessage(role=MessageRole.ASSISTANT, content=st.session_state.summarized_history)
             ]
             st.success("Chat history summarized!")
@@ -286,6 +307,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
     if 'general' in contextualized_prompt:
         # Provide response directly for 'general' queries
+        print('General')
         assistant_response = contextualized_prompt.split("Output:")[-1].strip()
         st.chat_message("assistant").write(assistant_response)
         st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
@@ -299,13 +321,19 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             final_prompt = [
                 ChatMessage(role=MessageRole.SYSTEM, content=system_prompt),
                 *st.session_state.chat_messages,
-                ChatMessage(role=MessageRole.USER, content=st.session_state.summarized_history)
+                # ChatMessage(role=MessageRole.USER, content=st.session_state.chat_messages)
             ]
-            # response = gemini_model.chat(ChatPromptTemplate.from_messages(final_prompt).format_messages()).message.content
-            response = gemini_model.chat(final_prompt).message.content
-            st.chat_message("assistant").write(response)
-            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
 
+            # response = gemini_model.chat(final_prompt).message.content
+            formatted_messages = [
+                {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
+                for msg in st.session_state.chat_messages[:-1]
+            ]
+            auto_reply = auto_agent.generate_reply(messages=formatted_messages)
+
+            st.chat_message("assistant").write(auto_reply.content)
+            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=auto_reply.content))
+            
         elif response_type == "context":
             print("Context")
             system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
@@ -319,7 +347,20 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 ChatMessage(role=MessageRole.USER, content=f"User Query: {contextualized_prompt}"),
                 ChatMessage(role=MessageRole.SYSTEM, content=f"Use the following context:\n{context_text}")
             ]
-            # response = agent.chat(message=ChatPromptTemplate.from_messages(final_prompt).format_messages()).response
-            response = agent.chat(message=f"User query: {contextualized_prompt}\n Use the following context: {context_text}", chat_history=st.session_state.chat_messages).response
-            st.chat_message("assistant").write(response)
-            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
+
+            # Prepare the input for the ConversableAgent
+            formatted_messages = [
+                {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
+                for msg in st.session_state.chat_messages[:-1]
+            ]
+
+            # Include context and the reformulated query
+            formatted_messages.append({"role": "user", "content": f"{contextualized_prompt}\nContext:\n{context_text}"})
+
+            # Generate a response using the ConversableAgent
+            response = auto_agent.generate_reply(messages=formatted_messages)
+            assistant_response = response.content
+
+            # Display the response
+            st.chat_message("assistant").write(assistant_response)
+            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
