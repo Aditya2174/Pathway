@@ -44,7 +44,7 @@ atexit.register(cleanup_cache)
 temp_dir = tempfile.TemporaryDirectory()
 
 # Initialize a Gemini-1.5-Flash model with LlamaIndex
-google_api_key = "AIzaSyAv4nC5249yC5YgB_skyL4MiDeM5fDJGjI"
+google_api_key = "AIzaSyD939q3PbECaSJO1IAzRbmpqlREgJteLKg"
 if not os.environ.get('GOOGLE_API_KEY'):
     os.environ['GOOGLE_API_KEY'] = google_api_key
 
@@ -78,67 +78,11 @@ if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 
 # Tavily search tool setup
-tavily_api_key = "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"
+tavily_api_key = "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"
 if not os.environ.get('TAVILY_API_KEY'):
     os.environ['TAVILY_API_KEY'] = tavily_api_key
 search_tool = TavilyToolSpec(api_key=tavily_api_key)
 search_tool = search_tool.to_tool_list()
-
-reformat_content = """
-You are an intelligent AI assistant. You will be provided with a user query and the chat history between the user and the chatbot. You will have to identify the type of the query, and give your output according to the following rules:
-- If the context of query is similar to the chat history, reformulate the query based on the chat history. Ensure that the reformulated query is as detailed and contextually rich as possible. Respond with query type as 'reformulation' and output as the reformulated query.
-- If the query is general and unrelated to the chat history and doesn't require any particular information to be answered, then respond with query type as 'general' and output as a polite response to the query.
-- If the query is completely unrelated to the chat history and require additional information to be answered, respond with query type as 'unrelated' and output the gramatically corrected query.
-
-Examples are provided below.
-
-Example 1:
-Chat History:
-user: Who discovered the laws of motion?
-ai: Isaac Newton
-User Query: Tell me more about him
-Query Type: reformulation
-Output: Tell me more about Isaac Newton who discovered the laws of motion.
-
-Example 2:
-Chat History:
-
-User Query: How are you?
-Query Type: general
-Output: I am doing well, thank you for asking. How can I help you today?
-
-Example 3:
-Chat History:
-user: Who discovered the laws of motion?
-ai: Isaac Newton
-User Query: What is the capital of France?
-Query Type: unrelated
-Output: What is the capital of France?
-
-Only return the Query Type and Output. Do not answer the User Query. Only refactor the query to better represent the chat history and context.
-"""
-
-response_type_content = """
-You are an intelligent AI assistant. You will be provided with a user query and the chat history between the user and the chatbot. You will have to identify how to answer the query, give your output according to following rules:
-- If the history has enough data for answering the query and you can answer it confidently wihtout relying on external context. Respond with "direct"
--Else if you are doubtful about your ability to answer the question based on only the provided context, respond with "context"
-
-Follow the given examples for reference
-
-Example 1:
-Chat History:
-The water molecule is made up of 2 atoms of hydrogen bonded with 1 oxygen atom.
-User Query: Tell me about the structure of the water molecule.
-Output: direct
-
-Example 2:
-Chat History:
-The Super Bowl is the annual league championship game of the National Football League (NFL) of the United States.
-User Query: When is the next super bowl happening.
-Output: context
-
-Only return the Output. Do not answer the User Query. Only answer with 'context' or 'direct', do not return empty or none or anything else.
-"""
 
 # Initializing a simple agent with a search tool
 agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
