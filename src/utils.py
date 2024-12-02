@@ -1,7 +1,17 @@
 from llama_index.core import PromptTemplate
 from datetime import datetime
 from llama_index.core.llms import ChatMessage, MessageRole
-from prompts import reformulation_type_prompt
+from prompts import (
+    reformulation_type_prompt,
+    reformulation_type_prompt_no_doc,
+    query_classification_prompt,
+    query_classification_prompt_no_doc
+)
+import tiktoken
+import streamlit as st
+
+if 'tiktoken_tokenizer' not in st.session_state:
+    st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
 
 def process_user_query(llm, chat_history, user_query, document):
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -15,8 +25,13 @@ def process_user_query(llm, chat_history, user_query, document):
 
     chat_history_str = '\n'.join(chat_history_li)
 
-    prompt = PromptTemplate((reformulation_type_prompt))
-    prompt = reformulation_type_prompt.format(current_date=current_date, chat_history=chat_history_str, user_query=user_query, document=document)
+    if document is not None:
+        prompt = PromptTemplate((reformulation_type_prompt))
+        prompt = reformulation_type_prompt.format(current_date=current_date, chat_history=chat_history_str, user_query=user_query, document=document)
+    else:
+        prompt = PromptTemplate((reformulation_type_prompt_no_doc))
+        prompt = reformulation_type_prompt_no_doc.format(current_date=current_date, chat_history=chat_history_str, user_query=user_query)
+
     resp = llm.complete(prompt).text
 
     resp_li = resp.split('\n')
@@ -28,3 +43,23 @@ def process_user_query(llm, chat_history, user_query, document):
 def get_colored_text(text, color = 'green'):
     txt = f"""Reformulated to: <span style="color: {color}; font-size: 14px;">{text}</span>"""
     return txt
+
+def get_num_tokens(txt):
+    num_tokens = len(st.session_state.tiktoken_tokenizer.encode(txt))
+    return num_tokens
+
+def classify_query(llm, user_query, query_type):
+    if 'direct' in query_type:
+        # Document is provided
+        prompt = PromptTemplate((query_classification_prompt))
+        prompt = query_classification_prompt.format(user_query=user_query)
+    else:
+        # Document is not provided
+        prompt = PromptTemplate((query_classification_prompt_no_doc))
+        prompt = query_classification_prompt_no_doc.format(user_query=user_query)
+
+    resp = llm.complete(prompt).text
+    resp_li = resp.split('\n')
+    resp_li = [x for x in resp_li if x != '']
+    query_type = resp_li[0].strip()
+    return query_type

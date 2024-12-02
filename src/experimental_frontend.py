@@ -16,7 +16,12 @@ from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.prompts import ChatPromptTemplate
 from llama_index.core.llms import ChatMessage, MessageRole
-from utils import process_user_query, get_colored_text
+from utils import (
+    process_user_query,
+    get_colored_text,
+    classify_query
+)
+from lsa import clustered_rag_lsa
 from llama_index.core.agent import ReActAgent
 from llama_index.tools.tavily_research import TavilyToolSpec
 from llama_index.core.indices import VectorStoreIndex
@@ -83,6 +88,8 @@ if 'sec_embedder' not in st.session_state:
 if 'sec_store' not in st.session_state:
     # st.session_state.sec_store = VectorStoreIndex(embed_model=st.session_state.sec_embedder).from_documents(st.session_state.uploaded_docs)
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
+if "attached_text" not in st.session_state:
+    st.session_state.attached_text = ""
 
 # Tavily search tool setup
 tavily_api_key = "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"
@@ -136,14 +143,13 @@ def extract_non_table_text(page):
 with st.sidebar:
     st.subheader("Upload Document")
     uploaded_file = st.file_uploader("Upload a .txt, .json, .csv or .pdf document", type=["txt", "json", "pdf", "csv"])
-    attached_text = ""
 
     if uploaded_file:
         file_size = uploaded_file.size
 
         if uploaded_file.type == "application/pdf":
             if uploaded_file.name in document_cache:
-                attached_text = document_cache[uploaded_file.name]
+                st.session_state.attached_text = document_cache[uploaded_file.name]
                 st.success(f"Loaded cached document: {uploaded_file.name}")
             else:
                 attached_pdf_text = ""
@@ -158,15 +164,15 @@ with st.sidebar:
                             for table in tables:
                                 for row in table:
                                     attached_pdf_text += " | ".join(cell if cell else "" for cell in row) + "\n"
-                            attached_pdf_text += "--- End of Table ---\n"     
-                attached_text = attached_pdf_text
+                            attached_pdf_text += "--- End of Table ---\n"
+                st.session_state.attached_text = attached_pdf_text
                 st.success("PDF parsed!")
             
         elif uploaded_file.type == "text/plain":
-            attached_text = uploaded_file.read().decode("utf-8")
+            st.session_state.attached_text = uploaded_file.read().decode("utf-8")
             st.success("Text document loaded!")
         elif uploaded_file.type == "application/json":
-            attached_text = json.dumps(json.load(uploaded_file), indent=2)
+            st.session_state.attached_text = json.dumps(json.load(uploaded_file), indent=2)
             st.success("JSON document loaded!")
         elif uploaded_file.type == "text/csv":
             # Size threshold in bytes (e.g., 5 MB)
@@ -174,7 +180,7 @@ with st.sidebar:
             if file_size <= SMALL_FILE_SIZE_THRESHOLD:
                 # Directly parse smaller CSV files
                 df = pd.read_csv(uploaded_file)
-                attached_text = df.to_string(index=False)  # Convert DataFrame to string
+                st.session_state.attached_text = df.to_string(index=False)  # Convert DataFrame to string
                 st.success("Small CSV loaded and parsed!")
             else:
                 # Process larger CSV files with derived insights
@@ -187,7 +193,7 @@ with st.sidebar:
                 Number of Columns: {df.shape[1]}
                 Columns: {', '.join(df.columns)}
                 """
-                attached_text = summary_info
+                st.session_state.attached_text = summary_info
                 
                 st.success("Large CSV loaded! Showing summary:")
                 st.text(summary_info)
@@ -198,7 +204,7 @@ with st.sidebar:
                 st.session_state.df = df
 
         # Add the parsed text as a Document for secondary vector store
-        doc = Document(text=attached_text, metadata={"filename": uploaded_file.name})
+        doc = Document(text=st.session_state.attached_text, metadata={"filename": uploaded_file.name})
         st.session_state.uploaded_docs.append(doc)
 
         # Update secondary vector store with new document
@@ -229,10 +235,10 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 ]
                 st.success("Chat history summarized!")
 
-        full_prompt = f"{user_input}\n\nAttached Document: {attached_text}" if attached_text else user_input
+        full_prompt = f"{user_input}\n\nAttached Document: {st.session_state.attached_text}" if (st.session_state.attached_text != "") else user_input
         with st.spinner("Analyzing user query..."):
             # contextualized_prompt = contextualize_prompt(user_input)
-            document_txt = attached_text if attached_text else ""
+            document_txt = st.session_state.attached_text if (st.session_state.attached_text != "") else None
             query_type, preprocess_op = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
 
         if 'general' in query_type:
@@ -251,13 +257,19 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
             st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=display_msg))
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=preprocess_op))
+
+            with st.spinner("Classifying user query..."):
+                query_class = classify_query(gemini_model, user_input, query_type)
+
+                print("Query Classification:", query_class)
+
             if 'direct' in query_type:
                 print("Query Type: Direct")
                 
-                if attached_text:
+                if st.session_state.attached_text:
                     # Modify the last message in the session state to include document context
                     last_message = st.session_state.chat_messages[-1]
-                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{attached_text}"
+                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{st.session_state.attached_text}"
 
                 formatted_messages = [
                     {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
