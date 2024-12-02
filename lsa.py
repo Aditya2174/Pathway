@@ -35,7 +35,7 @@ def summarize(context_docs, sentences_count=10):
         summary += str(sentence) + "\n"
     return summary
 
-def clustered_rag_lsa(question, context_docs):
+def clustered_rag_lsa(llm, question, context_docs):
 
     embedder = SentenceTransformer("all-MiniLM-L6-v2") 
     document_embeddings = embedder.encode(context_docs)
