@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "rag pipeline"
 authors = ["Aditya Garg"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.10,<=3.12"
@@ -13,18 +14,26 @@ pillow-heif = "^0.20.0"
 numpy = "<2.0"
 matplotlib = "^3.9.2"
 unstructured-inference = "^0.8.1"
+pdfplumber = "^0.11.4"
+nltk = "^3.9.1"
+streamlit = "^1.40.1"
+llama-index-llms-gemini = "^0.3.7"
+llama-index-tools-tavily-research = "^0.2.0"
+llama-index-core = "^0.11.23"
+autogen = "^0.4"
+einops = "^0.8.0"
+
+[tool.poetry.group.pathway]
+optional = true
+
+[tool.poetry.group.pathway.dependencies]
+pathway = {extras = ["xpack-llm-docs"], version = "*"}
 
 [tool.poetry.group.evaluations]
 optional = true
 
 [tool.poetry.group.evaluations.dependencies]
 pytest = "^6.0.0"
-
-[tool.poetry.group.pathway]
-optional = false
-
-[tool.poetry.group.pathway.dependencies]
-pathway = {extras = ["xpack-llm-docs"], version = "^0.15.2"}
 
 [build-system]
 requires = ["poetry-core"]

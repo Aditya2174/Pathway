@@ -1,0 +1,36 @@
+services:
+  base_image:
+    build: 
+      context: .
+      target: base
+    image: base_image
+    
+
+  server:
+    build:
+      context: .
+      target: server
+    ports:
+      - "8756:8756"  
+    depends_on:
+      - base_image
+    networks:
+      - app_network
+    volumes:
+      - ./data:/app/data
+
+  client:
+    build:
+      context: .
+      target: pipeline
+    ports:
+      - "8501:8501"
+    depends_on:
+      - base_image  
+      - server
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge

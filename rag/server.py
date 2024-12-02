@@ -19,7 +19,7 @@ data_sources = pw.io.fs.read(
 )
 
 
-splitter = SlidingWindowSentenceSplitter()
+splitter = SmallToBigSentenceSplitter()
 embedder = SentenceTransformerEmbedder(model ='all-MiniLM-L6-v2')
 parser = ParseUnstructured() # must have libmagic in system to use this
 
