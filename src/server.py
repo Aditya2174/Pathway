@@ -1,13 +1,13 @@
 import pathway as pw
 from pathway.xpacks.llm.vector_store import VectorStoreServer
 from sentence_transformers import SentenceTransformer
-from pathway.xpacks.llm.splitters import DefaultSentenceCountSplitter
+from pathway.xpacks.llm.splitters import DefaultSentenceCountSplitter, SlidingWindowSentenceSplitter 
 from pathway.xpacks.llm.embedders import SentenceTransformerEmbedder
 from pathway.xpacks.llm.parsers import ParseUnstructured
 
 # Pathway configuration
 model = SentenceTransformer('all-MiniLM-L6-v2')
-splitter = DefaultSentenceCountSplitter()
+splitter = SlidingWindowSentenceSplitter()
 embedder = SentenceTransformerEmbedder(model='all-MiniLM-L6-v2')
 parser = ParseUnstructured()
 
