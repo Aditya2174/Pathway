@@ -35,3 +35,16 @@ To add dependencies to the evaluation group, use the following command
 poetry add pytest --group evaluations
 ```
 For more information on groups, refer to the [official documentation](https://python-poetry.org/docs/managing-dependencies/)
+
+
+# Setting up local pathway
+
+Firstly install everything except pathway using poetry with the following command
+```bash
+poetry install --without pathway
+```
+
+Then install the local version of pathway using 
+```bash
+pip install -e .
+```
