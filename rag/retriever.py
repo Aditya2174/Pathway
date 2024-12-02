@@ -5,12 +5,12 @@ from custom_llm_chat import CustomLiteLLMChat
 import os
 import pathway as pw
 # set env
-os.environ["GEMINI_API_KEY"] = "<enter_your_key>" # use your api key here
+os.environ["GEMINI_API_KEY"] = "AIzaSyB_ic4AmBCWeFGnhV4WcVyU9GKPRRVQTyc" # use your api key here
 
 VECTOR_STORE_HOST = "127.0.0.1"
 VECTOR_STORE_PORT = 8755
 FIXED_QUERY = input("Enter your query: ")
-LLM_API_KEY = "<enter_your_key>"
+LLM_API_KEY = "AIzaSyB_ic4AmBCWeFGnhV4WcVyU9GKPRRVQTyc"
 
 import logging
 logging.basicConfig(level=logging.DEBUG)

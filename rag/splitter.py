@@ -188,13 +188,14 @@ class BaseSentenceSplitter(pw.UDF):
 
 class DefaultSentenceCountSplitter(BaseSentenceSplitter):
     """
-    Splits text into chunks based on min and max sentence limits.
+    Splits text into chunks based on min and max sentence limits and token/word limits.
     """
 
-    def __init__(self, min_sentences: int = 3, max_sentences: int = 10):
+    def __init__(self, min_sentences: int = 10, max_sentences: int = 50, max_tokens: int = 512):
         super().__init__()
         self.min_sentences = min_sentences
         self.max_sentences = max_sentences
+        self.max_tokens = max_tokens
 
     def __wrapped__(self, txt: str) -> list[tuple[str, dict]]:
         sentences = self._split_sentences(txt)
@@ -204,6 +205,10 @@ class DefaultSentenceCountSplitter(BaseSentenceSplitter):
         while i < len(sentences):
             chunk = " ".join(sentences[i:i + self.max_sentences])
             i += self.max_sentences
+
+            # Ensure chunk does not exceed max token/word limit
+            if len(chunk.split()) > self.max_tokens:
+                chunk = " ".join(chunk.split()[:self.max_tokens])
 
             # Find last punctuation within chunk to split meaningfully
             last_punctuation = max([chunk.rfind(p) for p in self.PUNCTUATION], default=-1)
@@ -217,13 +222,14 @@ class DefaultSentenceCountSplitter(BaseSentenceSplitter):
 
 class SlidingWindowSentenceSplitter(BaseSentenceSplitter):
     """
-    Splits text into overlapping chunks with a sliding window of sentences.
+    Splits text into overlapping chunks with a sliding window of sentences and token/word limits.
     """
 
-    def __init__(self, max_sentences: int = 10, overlap_sentences: int = 2):
+    def __init__(self, max_sentences: int = 50, overlap_sentences: int = 10, max_tokens: int = 512):
         super().__init__()
         self.max_sentences = max_sentences
         self.overlap_sentences = overlap_sentences
+        self.max_tokens = max_tokens
 
     def __wrapped__(self, txt: str) -> list[tuple[str, dict]]:
         sentences = self._split_sentences(txt)
@@ -233,6 +239,11 @@ class SlidingWindowSentenceSplitter(BaseSentenceSplitter):
         while i < len(sentences):
             end = min(i + self.max_sentences, len(sentences))
             chunk = " ".join(sentences[i:end])
+
+            # Ensure chunk does not exceed max token/word limit
+            if len(chunk.split()) > self.max_tokens:
+                chunk = " ".join(chunk.split()[:self.max_tokens])
+
             output.append((chunk, {}))
             i += self.max_sentences - self.overlap_sentences
 
@@ -241,14 +252,15 @@ class SlidingWindowSentenceSplitter(BaseSentenceSplitter):
 
 class SmallToBigSentenceSplitter(BaseSentenceSplitter):
     """
-    Splits text into small and large chunks for small-to-big chunking.
+    Splits text into small and large chunks for small-to-big chunking with token/word limits.
     """
 
-    def __init__(self, small_chunk_size: int = 3, large_chunk_size: int = 10, overlap_sentences: int = 2):
+    def __init__(self, small_chunk_size: int = 20, large_chunk_size: int = 50, overlap_sentences: int = 10, max_tokens: int = 512):
         super().__init__()
         self.small_chunk_size = small_chunk_size
         self.large_chunk_size = large_chunk_size
         self.overlap_sentences = overlap_sentences
+        self.max_tokens = max_tokens
 
     def __wrapped__(self, txt: str) -> list[tuple[str, dict]]:
         sentences = self._split_sentences(txt)
@@ -259,6 +271,11 @@ class SmallToBigSentenceSplitter(BaseSentenceSplitter):
         while i < len(sentences):
             end = min(i + self.small_chunk_size, len(sentences))
             small_chunk = " ".join(sentences[i:end])
+
+            # Ensure chunk does not exceed max token/word limit
+            if len(small_chunk.split()) > self.max_tokens:
+                small_chunk = " ".join(small_chunk.split()[:self.max_tokens])
+
             output.append((small_chunk, {"chunk_size": "small"}))
             i += self.small_chunk_size - self.overlap_sentences
 
@@ -267,6 +284,11 @@ class SmallToBigSentenceSplitter(BaseSentenceSplitter):
         while i < len(sentences):
             end = min(i + self.large_chunk_size, len(sentences))
             large_chunk = " ".join(sentences[i:end])
+
+            # Ensure chunk does not exceed max token/word limit
+            if len(large_chunk.split()) > self.max_tokens:
+                large_chunk = " ".join(large_chunk.split()[:self.max_tokens])
+
             output.append((large_chunk, {"chunk_size": "large"}))
             i += self.large_chunk_size - self.overlap_sentences
 

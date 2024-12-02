@@ -21,7 +21,8 @@ import requests
 import pathway as pw
 import pathway.xpacks.llm.parsers
 import pathway.xpacks.llm.splitters
-from pathway.stdlib.indexing import default_usearch_knn_document_index
+# from pathway.stdlib.indexing import default_usearch_knn_document_index ,default_lsh_knn_document_index
+from index import default_usearch_knn_document_index , default_lsh_knn_document_index, default_bm25_document_index
 from pathway.stdlib.indexing.data_index import _SCORE, DataIndex
 from pathway.stdlib.ml.classifiers import _knn_lsh
 from pathway.xpacks.llm._utils import _coerce_sync
@@ -293,6 +294,15 @@ pw.io.fs.read('./sample_docs', format='binary', mode='static', with_metadata=Tru
             metadata = data["metadata"]
 
             rets = self.splitter(text)
+            # Save the chunked documents to a file for debugging purposes
+            # with open("chunked_docs.txt", "a+") as f:
+            #     for ret in rets:
+            #         f.write(f"text: {ret[0]}, metadata: {metadata | ret[1]}\n")
+            
+            with open("chunked_docs_combined.json", "a+") as f:
+                json.dump({"metadata": metadata, "rets": rets}, f, indent=4)
+                f.write("\n")
+            # print(f'Chunked documents: {rets}')
             return [
                 dict(text=ret[0], metadata={**metadata, **ret[1]})  # type:ignore
                 for ret in rets
@@ -304,12 +314,12 @@ pw.io.fs.read('./sample_docs', format='binary', mode='static', with_metadata=Tru
 
         chunked_docs += chunked_docs.select(text=pw.this.data["text"].as_str())
 
-        knn_index = default_usearch_knn_document_index(
+        my_index = default_bm25_document_index(
             chunked_docs.text,
             chunked_docs,
-            dimensions=self.embedding_dimension,
+            # dimensions=self.embedding_dimension,
             metadata_column=chunked_docs.data["metadata"],
-            embedder=self.embedder,
+            # embedder=self.embedder,
         )
 
         parsed_docs += parsed_docs.select(
@@ -458,12 +468,12 @@ pw.io.fs.read('./sample_docs', format='binary', mode='static', with_metadata=Tru
     def retrieve_query(
         self, retrieval_queries: pw.Table[RetrieveQuerySchema]
     ) -> pw.Table[QueryResultSchema]:
-        knn_index: DataIndex = self._graph["knn_index"]
+        my_index: DataIndex = self._graph["my_index"]
 
         # Relevant document search
         retrieval_queries = self.merge_filters(retrieval_queries)
 
-        retrieval_results = retrieval_queries + knn_index.query_as_of_now(
+        retrieval_results = retrieval_queries + my_index.query_as_of_now(
             retrieval_queries.query,
             number_of_matches=retrieval_queries.k,
             collapse_rows=True,
