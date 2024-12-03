@@ -4,6 +4,7 @@ import streamlit as st
 # For file-related purposes
 import os
 import shutil
+from typing import Annotated
 import diskcache as dc
 import atexit
 import json
@@ -16,9 +17,7 @@ import pandas as pd
 from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
-from utils import process_user_query, get_colored_text, hyde
-# from llama_index.core.agent import ReActAgent
-# from llama_index.tools.tavily_research import TavilyToolSpec
+from utils import process_user_query, get_colored_text
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
 from llama_index.embeddings.google import GeminiEmbedding
@@ -32,6 +31,17 @@ from autogen.coding import LocalCommandLineCodeExecutor
 from transformers import pipeline
 
 import requests
+from tavily import TavilyClient
+
+# Tavily search tool setup
+tavily_api_key = "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"
+if not os.environ.get('TAVILY_API_KEY'):
+    os.environ['TAVILY_API_KEY'] = tavily_api_key
+
+tavily = TavilyClient(tavily_api_key)
+
+def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
+    return tavily.get_search_context(query=query, search_depth="advanced")
 
 if not os.environ.get('AUTOGEN_USE_DOCKER'):
     os.environ['AUTOGEN_USE_DOCKER'] = '0'
@@ -141,14 +151,15 @@ if 'df' not in st.session_state:
 if 'uploaded_docs' not in st.session_state:
     st.session_state.uploaded_docs = []
 if 'uploaded_filenames' not in st.session_state:
-        st.session_state.uploaded_filenames = set()
+    st.session_state.uploaded_filenames = set()
 if 'sec_embedder' not in st.session_state:
     st.session_state.sec_embedder = GeminiEmbedding(model_name='models/embedding-001')
 if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 
 agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query. The user may reference documents they provided, which will be given to you as context.\
-    You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary."
+    You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary.\
+        If extra information is needed to answer the question, use a web search."
 executor = LocalCommandLineCodeExecutor(work_dir=temp_dir.name)
 auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt,
                                 llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
@@ -157,6 +168,14 @@ auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system
 user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor})
 
 register_function(web_search_with_logging, caller=auto_agent, executor=user_proxy, name="search_tool", description="A tool to search the web and fetch information.")
+
+register_function(
+    search_tool,
+    caller=auto_agent,
+    executor=user_proxy,
+    name="search_tool",
+    description="Search the web for the given query",
+)
 
 def summarize_history(messages):
     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
@@ -275,107 +294,112 @@ with st.sidebar:
 
                 st.success(f"Document '{file_name}' added to the secondary vector store!")
 
-# Display the chat history
+# Initialize state variables
+if "displayed_message_contents" not in st.session_state:
+    st.session_state.displayed_message_contents = set()
+
+# Refresh chat history display to avoid duplicates
+st.session_state.chat_messages_display = [
+    msg for msg in st.session_state.chat_messages
+    if msg.content not in st.session_state.displayed_message_contents
+    and not st.session_state.displayed_message_contents.add(msg.content)
+]
+
+# Display chat messages
 for chat in st.session_state.chat_messages_display:
     role = "assistant" if chat.role == MessageRole.ASSISTANT else "user"
     with st.chat_message(role):
         st.markdown(chat.content, unsafe_allow_html=True)
 
-# Chat input for user to enter prompt
+# Chat input
 if user_input := st.chat_input("Enter your chat prompt:"):
     st.session_state.message_counter += 1
+    st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
+
+    # Add user message to chat history
+    user_message = ChatMessage(role=MessageRole.USER, content=user_input)
+    st.session_state.chat_messages.append(user_message)
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    with st.chat_message("assistant"):
-        # Summarize history periodically
-        if st.session_state.message_counter % SUMMARIZE_AFTER == 0:
-            with st.spinner(text="Summarizing history..."):
-                st.session_state.summarized_history = summarize_history(st.session_state.chat_messages)
-                st.session_state.chat_messages = [
-                    st.session_state.chat_messages[0],
-                    ChatMessage(role=MessageRole.ASSISTANT, content=st.session_state.summarized_history)
-                ]
-                st.success("Chat history summarized!")
+    # Summarize history periodically
+    if st.session_state.message_counter % SUMMARIZE_AFTER == 0:
+        with st.spinner("Summarizing history..."):
+            summary = summarize_history(st.session_state.chat_messages)
+            st.session_state.chat_messages = [
+                st.session_state.chat_messages[0],  # Keep first message for context
+                ChatMessage(role=MessageRole.ASSISTANT, content=summary)
+            ]
+            st.success("Chat history summarized!")
 
-        full_prompt = f"{user_input}\n\nAttached Document: {combined_attached_text}" if combined_attached_text else user_input
-        with st.spinner("Analyzing user query..."):
-            # contextualized_prompt = contextualize_prompt(user_input)
-            document_txt = combined_attached_text if combined_attached_text else ""
-            query_type, preprocess_op = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
+    # Analyze user query
+    full_prompt = f"{user_input}\n\nAttached Document: {combined_attached_text}" if combined_attached_text else user_input
+    with st.spinner("Analyzing user query..."):
+        query_type, response = process_user_query(
+            gemini_model,
+            st.session_state.chat_messages,
+            user_input,
+            document=combined_attached_text if combined_attached_text else ""
+        )
 
-        if 'general' in query_type:
-            # Provide response directly for 'general' queries
-            print('Query Type: General')
-            st.markdown(preprocess_op)
-            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
-            st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=user_input))
-            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=preprocess_op))
-            st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.ASSISTANT, content=preprocess_op))
-        else:
-            green_txt_reform = get_colored_text(preprocess_op)
-            st.markdown(green_txt_reform, unsafe_allow_html=True)
+    # Handle responses based on query type
+    if query_type == "general":
+        assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=response)
+        st.session_state.chat_messages.append(assistant_message)
+        with st.chat_message("assistant"):
+            st.markdown(response)
 
-            display_msg = user_input + "<br>" + green_txt_reform
+    elif query_type == "direct":
+        with st.spinner("Providing direct response..."):
+            try:
+                chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=user_message.content)
+                assistant_responses = []
 
-            st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=display_msg))
-            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=preprocess_op))
-            if 'direct' in query_type:
-                print("Query Type: Direct")
+                for message in chat_result.chat_history:
+                    if message['name'] == "assistant":
+                        assistant_responses.append(message['content'])
+
+                # Combine all assistant responses into one message
+                unified_response = "\n\n".join(assistant_responses)
+                assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
+                st.session_state.chat_messages.append(assistant_message)
                 
-                if combined_attached_text:
-                    # Modify the last message in the session state to include document context
-                    last_message = st.session_state.chat_messages[-1]
-                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{combined_attached_text}"
+                with st.chat_message("assistant"):
+                    st.markdown(unified_response, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
 
+    elif query_type == "context":
+        with st.spinner("Retrieving information"):
+            try:
+                # Retrieve contexts
+                context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+
+                # Format messages for the assistant
                 formatted_messages = [
                     {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
                     for msg in st.session_state.chat_messages
                 ]
-                auto_reply = auto_agent.generate_reply(messages=formatted_messages)
+                formatted_messages.append({"role": "user", "content": f"{response}\nContext:\n{combined_context}"})
 
-                chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=st.session_state.chat_messages[-1].content)
-                print(f"Chat Result:\n{chat_result['chat_history'][-1]['content']}")
-                st.markdown(auto_reply['content'])
-                st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=auto_reply['content']))
-                st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.ASSISTANT, content=auto_reply['content']))
+                # chat_result = auto_agent.generate_reply(messages=formatted_messages)
+                chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=user_message.content)
+                assistant_responses = []
 
-            elif 'context' in query_type:
-                print("Query Type: Context")
-                system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
-                contextualized_prompt = preprocess_op
-                # Retrieve additional context
-                hyde_prompt = hyde(contextualized_prompt, gemini_model)
-                context = retriever.retrieve(hyde_prompt)
-                context_text = "\n".join([doc.text for doc in context])
+                for message in chat_result.chat_history:
+                    if message['name'] == "assistant":
+                        assistant_responses.append(message['content'])
 
-                sec_retriever = st.session_state.sec_store.as_retriever()
-                context = sec_retriever.retrieve(hyde_prompt)
-                sec_context_text = "\n".join([doc.text for doc in context])
-
-                combined_context_text = f"Context from database:\n{context_text}\n\nContext from document uploaded by user:\n{sec_context_text}"
-
-                # Prepare the input for the ConversableAgent
-                formatted_messages = [
-                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                    for msg in st.session_state.chat_messages[:-1]
-                ]
-
-                # Include context and the reformulated query
-                formatted_messages.append({"role": "user", "content": f"{contextualized_prompt}\nContext:\n{context_text}"})
-
-                # Generate a response using the ConversableAgent
-                response = auto_agent.generate_reply(messages=formatted_messages)
-                chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=st.session_state.chat_messages[-1].content)
-                print(f"Chat Result:\n{chat_result}")
-                assistant_response = response['content']
-
-                # Display the response
-                st.markdown(assistant_response)
-                st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
-                st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.ASSISTANT, content=assistant_response))
-            else:
-                print("Invalid response type detected:", query_type)
-                st.error("Invalid response type detected. Please try again.")
-
-    print(st.session_state.chat_messages)
+                # Combine all assistant responses into one message
+                unified_response = "\n\n".join(assistant_responses)
+                assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
+                st.session_state.chat_messages.append(assistant_message)
+                
+                with st.chat_message("assistant"):
+                    st.markdown(unified_response, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+    else:
+        st.error("Invalid query type detected. Please try again.")
