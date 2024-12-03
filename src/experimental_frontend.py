@@ -16,12 +16,7 @@ from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.prompts import ChatPromptTemplate
 from llama_index.core.llms import ChatMessage, MessageRole
-from utils import (
-    process_user_query,
-    get_colored_text,
-    classify_query
-)
-from lsa import clustered_rag_lsa
+from utils import process_user_query, get_colored_text, hyde, classify_query
 from llama_index.core.agent import ReActAgent
 from llama_index.tools.tavily_research import TavilyToolSpec
 from llama_index.core.indices import VectorStoreIndex
@@ -104,7 +99,7 @@ agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
 agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query. The user may reference documents they provided, which will be given to you as context."
 executor = LocalCommandLineCodeExecutor(work_dir=temp_dir.name)
 auto_agent = ConversableAgent(name="code_executor", human_input_mode="NEVER", system_message=agent_system_prompt,
-                                llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]})
+                                llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}], "stream":True})
 
 def summarize_history(messages):
     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
@@ -286,8 +281,9 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
                 contextualized_prompt = preprocess_op
                 # Retrieve additional context
-                context = retriever.retrieve(contextualized_prompt)
-                context_text = "\n".join([doc.text for doc in context])
+                query = hyde(contextualized_prompt)
+                context = retriever.retrieve(query)
+                context_text = "\n".join(["Metadata: "+str(doc.metadata)+'\nContent:'+doc.text for doc in context])
 
                 sec_retriever = st.session_state.sec_store.as_retriever()
                 context = sec_retriever.retrieve(contextualized_prompt)
@@ -305,8 +301,9 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 formatted_messages.append({"role": "user", "content": f"{contextualized_prompt}\nContext:\n{context_text}"})
 
                 # Generate a response using the ConversableAgent
-                response = auto_agent.generate_reply(messages=formatted_messages)
-                assistant_response = response['content']
+                stream_response = auto_agent.generate_reply(messages=formatted_messages)
+                assistant_response = st.write_stream(stream_response['content'])
+                # assistant_response = response['content']
 
                 # Display the response
                 st.markdown(assistant_response)

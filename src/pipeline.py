@@ -270,7 +270,10 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             # st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=final_prompt))
             
             # Get the agent's response
-            response = agent.chat(message=final_prompt, chat_history=st.session_state.reformulated_messages[:-1]).response
+            stream_response = agent.stream_chat(message=final_prompt, chat_history=st.session_state.reformulated_messages[:-1])
+            response = st.write_stream(stream_response)
+            # for response in stream_response.chat_stream:
+            #     print(response.message.content)
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
             st.session_state.reformulated_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
             st.chat_message("assistant").write(response)

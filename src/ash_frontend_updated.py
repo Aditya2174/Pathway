@@ -16,7 +16,9 @@ import pandas as pd
 from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
-from utils import process_user_query, get_colored_text
+from utils import process_user_query, get_colored_text, hyde
+# from llama_index.core.agent import ReActAgent
+# from llama_index.tools.tavily_research import TavilyToolSpec
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
 from llama_index.embeddings.google import GeminiEmbedding
@@ -343,11 +345,12 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query as context."
                 contextualized_prompt = preprocess_op
                 # Retrieve additional context
-                context = retriever.retrieve(contextualized_prompt)
+                hyde_prompt = hyde(contextualized_prompt, gemini_model)
+                context = retriever.retrieve(hyde_prompt)
                 context_text = "\n".join([doc.text for doc in context])
 
                 sec_retriever = st.session_state.sec_store.as_retriever()
-                context = sec_retriever.retrieve(contextualized_prompt)
+                context = sec_retriever.retrieve(hyde_prompt)
                 sec_context_text = "\n".join([doc.text for doc in context])
 
                 combined_context_text = f"Context from database:\n{context_text}\n\nContext from document uploaded by user:\n{sec_context_text}"

@@ -28,7 +28,7 @@ vector_store_server = VectorStoreServer(
 )
 
 # Configuring the host and port
-PATHWAY_HOST = "0.0.0.0"
+PATHWAY_HOST = "127.0.0.1"
 PATHWAY_PORT = 8756
 
 def run_server():
