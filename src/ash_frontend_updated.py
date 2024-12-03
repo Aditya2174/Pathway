@@ -17,8 +17,6 @@ from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
 from utils import process_user_query, get_colored_text
-# from llama_index.core.agent import ReActAgent
-# from llama_index.tools.tavily_research import TavilyToolSpec
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
 from llama_index.embeddings.google import GeminiEmbedding
@@ -147,25 +145,14 @@ if 'sec_embedder' not in st.session_state:
 if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 
-# Tavily search tool setup
-# tavily_api_key = "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"
-# if not os.environ.get('TAVILY_API_KEY'):
-#     os.environ['TAVILY_API_KEY'] = tavily_api_key
-# search_tool = TavilyToolSpec(api_key=tavily_api_key)
-# search_tool = search_tool.to_tool_list()
-
-# # Initializing a simple agent with a search tool
-# agent = ReActAgent.from_tools(tools=search_tool, llm=gemini_model)
-
 agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query. The user may reference documents they provided, which will be given to you as context.\
     You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary."
 executor = LocalCommandLineCodeExecutor(work_dir=temp_dir.name)
-code_executor_agent = ConversableAgent(name="code_executor", human_input_mode="NEVER", llm_config=False, code_execution_config={'executor': executor})
 auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt,
                                 llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
-user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1)
+user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor})
 
 register_function(web_search_with_logging, caller=auto_agent, executor=user_proxy, name="search_tool", description="A tool to search the web and fetch information.")
 
@@ -334,7 +321,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             if 'direct' in query_type:
                 print("Query Type: Direct")
                 
-                if attached_text:
+                if combined_attached_text:
                     # Modify the last message in the session state to include document context
                     last_message = st.session_state.chat_messages[-1]
                     last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{combined_attached_text}"
@@ -346,7 +333,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 auto_reply = auto_agent.generate_reply(messages=formatted_messages)
 
                 chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=st.session_state.chat_messages[-1].content)
-                print(f"Chat Result:\n{chat_result}")
+                print(f"Chat Result:\n{chat_result['chat_history'][-1]['content']}")
                 st.markdown(auto_reply['content'])
                 st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=auto_reply['content']))
                 st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.ASSISTANT, content=auto_reply['content']))
