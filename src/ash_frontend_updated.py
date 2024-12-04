@@ -18,10 +18,12 @@ from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
 from utils import process_user_query, get_colored_text
+from prompts import agent_system_prompt, user_proxy_prompt
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
 from llama_index.embeddings.google import GeminiEmbedding
 import torch
+from datetime import datetime
 
 # Autogen agents
 from autogen import ConversableAgent, UserProxyAgent, register_function
@@ -171,16 +173,13 @@ if 'sec_embedder' not in st.session_state:
 if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 
-agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query. The user may reference documents they provided, which will be given to you as context.\
-    You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary.\
-        If extra information is needed to answer the question, use a web search."
 executor = LocalCommandLineCodeExecutor(work_dir="coding")
-auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt,
+auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt.format(current_date = datetime.now().strftime("%Y-%m-%d")),
                                 llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
 user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
-                            default_auto_reply="If you have any new information, state it, otherwise indicate that you are ready for the next query.")
+                            default_auto_reply=user_proxy_prompt)
 
 # register_function(web_search_with_logging, caller=auto_agent, executor=user_proxy, name="search_tool", description="A tool to search the web and fetch information.")
 

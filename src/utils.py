@@ -29,10 +29,10 @@ def process_user_query(llm, chat_history, user_query, document):
 
     if document is not None:
         prompt = PromptTemplate((reformulation_type_prompt))
-        prompt = reformulation_type_prompt.format(current_date=current_date, chat_history=chat_history_str, user_query=user_query, document=document)
+        prompt = prompt.format(current_date=current_date, chat_history=chat_history_str, user_query=user_query, document=document)
     else:
         prompt = PromptTemplate((reformulation_type_prompt_no_doc))
-        prompt = reformulation_type_prompt_no_doc.format(current_date=current_date, chat_history=chat_history_str, user_query=user_query)
+        prompt = prompt.format(current_date=current_date, chat_history=chat_history_str, user_query=user_query)
 
     resp = llm.complete(prompt).text
 
@@ -54,11 +54,11 @@ def classify_query(llm, user_query, query_type):
     if 'direct' in query_type:
         # Document is provided
         prompt = PromptTemplate((query_classification_prompt))
-        prompt = query_classification_prompt.format(user_query=user_query)
+        prompt = prompt.format(user_query=user_query)
     else:
         # Document is not provided
         prompt = PromptTemplate((query_classification_prompt_no_doc))
-        prompt = query_classification_prompt_no_doc.format(user_query=user_query)
+        prompt = prompt.format(user_query=user_query)
 
     resp = llm.complete(prompt).text
     resp_li = resp.split('\n')
