@@ -7,12 +7,8 @@ from prompts import (
     query_classification_prompt,
     query_classification_prompt_no_doc
 )
-import tiktoken
 import streamlit as st
-import google.generativeai as genai
 
-if 'tiktoken_tokenizer' not in st.session_state:
-    st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
 from prompts import reformulation_type_prompt
 
 def get_history_str(chat_history):
@@ -76,11 +72,12 @@ def classify_query(llm, user_query, query_type):
     resp_li = [x for x in resp_li if x != '']
     query_type = resp_li[0].strip()
     return query_type
+
 def hyde(query, model):
     query = "Expand the given query into a document for retrieval. Do not add any numerical information or ask for clarification or make unnecessary changes.\n"+query
     print("start:"+query)
         # print("start:"+query)
-    query_doc = model.complete(query, generation_config={'max_output_tokens':100,"temperature":0.2}).text
+    query_doc = model.complete(query, generation_config={'max_output_tokens':200,"temperature":0.2}).text
     print("end:"+query_doc)
-    return query_doc
+    return query_doc+query
     

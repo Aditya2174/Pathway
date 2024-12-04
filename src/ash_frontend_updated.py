@@ -1,5 +1,6 @@
 # Streamlit for UI
 import streamlit as st
+st.set_page_config(layout="wide", initial_sidebar_state="auto")
 
 # For file-related purposes
 import os
@@ -12,12 +13,17 @@ import json
 import requests
 import pdfplumber
 import pandas as pd
+import tiktoken
 
 # All LlamaIndex tools needed...LLM, memory, roles, etc
 from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
-from utils import process_user_query, get_colored_text, get_history_str
+from utils import process_user_query, get_colored_text, get_history_str, hyde, get_num_tokens
+from gaurdrail import ChatModerator
+from huggingface_hub import login
+# from llama_index.core.agent import ReActAgent
+# from llama_index.tools.tavily_research import TavilyToolSpec
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
 from llama_index.embeddings.google import GeminiEmbedding
@@ -61,7 +67,7 @@ def evaluate_sufficiency(context_text: str, query: str) -> bool:
 if not os.environ.get('AUTOGEN_USE_DOCKER'):
     os.environ['AUTOGEN_USE_DOCKER'] = '0'
 
-google_api_key = "AIzaSyD939q3PbECaSJO1IAzRbmpqlREgJteLKg"
+google_api_key = "AIzaSyAjcXdnMAYrMXLv0cml6MNQF5udbV-F4xo"
 if not os.environ.get('GOOGLE_API_KEY'):
     os.environ['GOOGLE_API_KEY'] = google_api_key
 
@@ -153,6 +159,7 @@ gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)  
 
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT, similarity_top_k=5)
 
+
 # Initialize session variables
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
@@ -174,6 +181,11 @@ if 'sec_embedder' not in st.session_state:
     st.session_state.sec_embedder = GeminiEmbedding(model_name='models/embedding-001')
 if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
+if 'tiktoken_tokenizer' not in st.session_state:
+    st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
+if 'moderator' not in st.session_state:
+    login()  #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 moi tokennn.
+    st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
 
 agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query. The user may reference documents they provided, which will be given to you as context.\
     You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary.\
@@ -332,121 +344,166 @@ for chat in st.session_state.chat_messages_display:
 
 # Chat input
 if user_input := st.chat_input("Enter your chat prompt:"):
-    st.session_state.message_counter += 1
-    st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
+    result = st.session_state.moderator.moderate_chat([{"role": "user", "content": user_input}])
+    print(result)
+    result = result.split('\n')[0]
+    if result == 'safe':
+        st.session_state.message_counter += 1
+        st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
 
-    # Add user message to chat history
-    user_message = ChatMessage(role=MessageRole.USER, content=user_input)
-    st.session_state.chat_messages.append(user_message)
-    with st.chat_message("user"):
-        st.markdown(user_input)
+        # Add user message to chat history
+        # user_message = ChatMessage(role=MessageRole.USER, content=user_input)
+        # st.session_state.chat_messages.append(user_message)
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-    # Summarize history periodically
-    if st.session_state.message_counter % SUMMARIZE_AFTER == 0:
-        with st.spinner("Summarizing history..."):
-            summary = summarize_history(st.session_state.chat_messages)
-            st.session_state.chat_messages = [
-                st.session_state.chat_messages[0],  # Keep first message for context
-                ChatMessage(role=MessageRole.ASSISTANT, content=summary)
-            ]
-            st.success("Chat history summarized!")
+            # Summarize history periodically
+        if st.session_state.message_counter % SUMMARIZE_AFTER == 0:
+            with st.status("Summarizing history...", expanded=False) as status0:
+                st.session_state.summarized_history = summarize_history(st.session_state.chat_messages)
+                st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
+                st.session_state.chat_messages = [
+                    st.session_state.chat_messages[0],
+                    ChatMessage(role=MessageRole.ASSISTANT, content=st.session_state.summarized_history)
+                ]
+                st.write("Summarised History:\n"+st.session_state.summarized_history)
+            status0.update(label="Summarized successfully", expanded=False)
 
-    # Analyze user query
-    full_prompt = f"{user_input}\n\nAttached Document: {combined_attached_text}" if combined_attached_text else user_input
-    with st.spinner("Analyzing user query..."):
-        query_type, response = process_user_query(
-            gemini_model,
-            st.session_state.chat_messages,
-            user_input,
-            document=combined_attached_text if combined_attached_text else ""
-        )
 
-    # Handle responses based on query type
-    if query_type == "general":
-        assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=response)
-        st.session_state.chat_messages.append(assistant_message)
-        with st.chat_message("assistant"):
-            st.markdown(response)
+        full_prompt = f"{user_input}\n\nAttached Document: {combined_attached_text}" if combined_attached_text else user_input
+        with st.status("Analyzing user query...", expanded=False) as status1:
+            # contextualized_prompt = contextualize_prompt(user_input)
+            document_txt = combined_attached_text if combined_attached_text else ""
+            query_type, response = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
+            st.write(f"Query Type: {query_type}")
+            st.write(f"Reformed query: {response}")
+        status1.update(label=f'Query Type: {query_type}', expanded=False, state='complete')
 
-    elif query_type == "direct":
-        with st.spinner("Providing direct response..."):
-            try:
+        # Handle responses based on query type
+        if query_type == "general":
+            assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=response)
+            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
+            st.session_state.chat_messages.append(assistant_message)
+            st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=user_input))
+            with st.chat_message("assistant"):
+                st.markdown(response)
+        else:
+            green_txt_reform = get_colored_text(response)
+            # st.markdown(green_txt_reform, unsafe_allow_html=True)
+            display_msg = user_input + "<br>" + green_txt_reform
+            st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=display_msg))
+            st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=response))
+            if query_type == 'direct':
+                print("Query Type: Direct")
+                if combined_attached_text:
+                    # Modify the last message in the session state to include document context
+                    last_message = st.session_state.chat_messages[-1]
+                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{combined_attached_text}"
+
+                formatted_messages = [
+                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
+                    for msg in st.session_state.chat_messages
+                ]
                 response_with_h = get_history_str(st.session_state.chat_messages)
                 combined_attached_text = combined_attached_text if combined_attached_text else ""
-                chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
-                assistant_responses = []
+                with st.status("Generating response...", expanded=False) as status2:
+                    st.write("Query Type: Direct")
+                    try:
+                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
+                        assistant_responses = []
 
-                for message in chat_result.chat_history:
-                    if message['name'] == "assistant":
-                        assistant_responses.append(message['content'])
+                        for message in chat_result.chat_history:
+                            if message['name'] == "assistant":
+                                assistant_responses.append(message['content'])
 
-                # Combine all assistant responses into one message
-                unified_response = "\n\n".join(assistant_responses)
-                assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
-                st.session_state.chat_messages.append(assistant_message)
-                
+                        # Combine all assistant responses into one message
+                        unified_response = "\n\n".join(assistant_responses)
+                        assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
+                        st.markdown(unified_response, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"An error occurred: {e}")
+
+                    # print(f"Chat Result:\n{chat_result['chat_history'][-1]['content']}")
                 with st.chat_message("assistant"):
                     st.markdown(unified_response, unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+                st.session_state.chat_messages.append(assistant_message)
+                st.session_state.chat_messages_display.append(assistant_message)
+                status2.update(label="Generation Complete!", expanded=False)
 
-    # Handle responses based on query type
-    elif query_type == "context":
-        with st.spinner("Retrieving information"):
-            try:
-                # Initial retrieval of context
-                retriever.similarity_top_k = 5  # Reset retrieval depth
-                context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
-                sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
-                combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+            elif query_type == "context":
+                print("Query Type: Context")
+                sufficient = None
+                with st.status("Retrieving data...", expanded=False) as status3:
+                    try:
+                        # Initial retrieval of context
+                        retriever.similarity_top_k = 5  # Reset retrieval depth
+                        token_len = get_num_tokens(response)
+                        print(f"no of tokens: {token_len}")
+                        if(token_len<40):
+                            response = hyde(response, gemini_model)
+                        print(response)
+                        context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                        sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                        combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+                        sufficient = evaluate_sufficiency(combined_context, response)
+                        
+                        if not sufficient:
+                            retriever.similarity_top_k += 5  # Increase retrieval depth
+                            additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                            additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                            combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
+                        
+                        sufficient = sufficient or evaluate_sufficiency(combined_context, response)
+                            
+                        if not sufficient:
+                            # Use web search tool if still insufficient
+                            search_results = web_search_with_logging(response)
+                            combined_context += f"\n\nWeb Search Results:\n{search_results}"
+                            print(f"Search result: {search_results}")
+                        
+                        sufficient = sufficient or evaluate_sufficiency(combined_context, response)
+                        st.write(combined_context)
+                    except Exception as e:
+                        st.error(f"An error occurred: {e}")
+                status3.update(label="Retrieval Complete!" if sufficient else "Not enough contex 🙁", expanded=False)
 
-                # Evaluate sufficiency
-                if not evaluate_sufficiency(combined_context, response):
-                    retriever.similarity_top_k += 5  # Increase retrieval depth
-                    additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
-                    additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
-                    combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
+                if not sufficient:
+                    # Notify the user about insufficiency
+                    assistant_message = ChatMessage(
+                        role=MessageRole.ASSISTANT,
+                        content=(
+                            "I couldn't find sufficient context to fully answer your query based on available documents and web search. "
+                            "Please provide a clarified query."
+                        ),
+                    )
+                    st.session_state.chat_messages.append(assistant_message)
+                    with st.chat_message("assistant"):
+                        st.markdown(assistant_message.content)
+                else:
+                    formatted_messages = [
+                        {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
+                        for msg in st.session_state.chat_messages
+                    ]
+                    formatted_messages.append({"role": "user", "content": f"{response}\nContext:\n{combined_context}"})
+                    response_with_h = get_history_str(st.session_state.chat_messages) + f"\nContext:\n{combined_context}"
 
-                    # Re-evaluate sufficiency
-                    if not evaluate_sufficiency(combined_context, response):
-                        # Use web search tool if still insufficient
-                        search_results = web_search_with_logging(response)
-                        combined_context += f"\n\nWeb Search Results:\n{search_results}"
-                        print(f"Search result: {search_results}")
-                        # Final sufficiency check
-                        if not evaluate_sufficiency(combined_context, response):
-                            # Notify the user about insufficiency
-                            assistant_message = ChatMessage(
-                                role=MessageRole.ASSISTANT,
-                                content=(
-                                    "I couldn't find sufficient context to fully answer your query based on available documents and web search. "
-                                    "Please provide a clarified query."
-                                ),
-                            )
-                            st.session_state.chat_messages.append(assistant_message)
-                            with st.chat_message("assistant"):
-                                st.markdown(assistant_message.content)
-                        else:
-                            # Process sufficient context
-                            formatted_messages = [
-                                {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                                for msg in st.session_state.chat_messages
-                            ]
-                            formatted_messages.append({"role": "user", "content": f"{response}\nContext:\n{combined_context}"})
-                            response_with_h = get_history_str(st.session_state.chat_messages) + f"\nContext:\n{combined_context}"
-                            chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
-                            assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
+                    with st.status("Generating response...", expanded=False) as status2:
+                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=respose_with_h)
+                        assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
+                        st.write(chat_result)
 
-                            # Combine all assistant responses into one message
-                            unified_response = "\n\n".join(assistant_responses)
-                            assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
+                        # Combine all assistant responses into one message
+                        unified_response = "\n\n".join(assistant_responses)
+                        assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
+                        st.session_state.chat_messages.append(assistant_message)
 
-                            st.session_state.chat_messages.append(assistant_message)
-
-                            with st.chat_message("assistant"):
-                                st.markdown(unified_response, unsafe_allow_html=True)
-
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+                    with st.chat_message("assistant"):
+                        st.markdown(unified_response, unsafe_allow_html=True)
+                    status2.update(label="Generation Complete!", expanded=False)
+            else:
+                print("Invalid response type detected:", query_type)
+                st.error("Invalid response type detected. Please try again.")
     else:
-        st.error("Invalid query type detected. Please try again.")
+        print("Unsafe query detected:")
+        st.error("Unsafe query detected. Please try again.")
+    print(st.session_state.chat_messages)

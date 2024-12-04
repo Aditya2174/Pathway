@@ -35,8 +35,8 @@ def run_server():
     vector_store_server.run_server(
         host=PATHWAY_HOST,
         port=PATHWAY_PORT,
-        with_cache=False,
-        threaded=False,
+        with_cache=True,
+        threaded=True,
     )
 
 # Running the server
