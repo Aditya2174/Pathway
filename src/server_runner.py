@@ -5,13 +5,13 @@ from pathway.xpacks.llm.embedders import SentenceTransformerEmbedder
 from pathway.xpacks.llm.parsers import ParseUnstructured
 
 # Pathway configuration
-splitter = TokenCountSplitter(min_tokens=1, max_tokens=10000)
+splitter = TokenCountSplitter(min_tokens=1, max_tokens=768)
 embedder = SentenceTransformerEmbedder(model='nomic-ai/nomic-embed-text-v1.5', **{'trust_remote_code': True})
 parser = ParseUnstructured()
 
 # Initialize the Pathway Vector Store Server
 data_sources = pw.io.fs.read(
-    "./data",
+    "../data",
     format="binary",
     mode="streaming",
     with_metadata=True,
@@ -33,7 +33,7 @@ def run_server():
     vector_store_server.run_server(
         host=PATHWAY_HOST,
         port=PATHWAY_PORT,
-        with_cache=False,
+        with_cache=True,
         threaded=True,
     )
 

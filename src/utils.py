@@ -7,8 +7,13 @@ from prompts import (
     query_classification_prompt,
     query_classification_prompt_no_doc
 )
+from llama_index.llms.gemini import Gemini
+import tiktoken
 import streamlit as st
-
+import google.generativeai as genai
+from typing import Tuple
+if 'tiktoken_tokenizer' not in st.session_state:
+    st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
 from prompts import reformulation_type_prompt
 
 def get_history_str(chat_history):
@@ -22,9 +27,8 @@ def get_history_str(chat_history):
     chat_history_str = '\n'.join(chat_history_li)
     return chat_history_str
 
-def process_user_query(llm, chat_history, user_query, document):
+def process_user_query(llm : Gemini , chat_history, user_query, document) -> Tuple[str, str, int]:
     current_date = datetime.now().strftime("%Y-%m-%d")
-
     chat_history_li = []
     for chat in chat_history:
         if chat.role == MessageRole.USER:
@@ -41,13 +45,15 @@ def process_user_query(llm, chat_history, user_query, document):
         prompt = PromptTemplate((reformulation_type_prompt_no_doc))
         prompt = reformulation_type_prompt_no_doc.format(current_date=current_date, chat_history=chat_history_str, user_query=user_query)
 
-    resp = llm.complete(prompt).text
+    result = llm.complete(prompt)
+    cost = result.raw['usage_metadata']['total_token_count']
+    resp = result.text
 
     resp_li = resp.split('\n')
     resp_li = [x for x in resp_li if x != '']
     query_type = resp_li[0].split('Query Type:')[-1].strip()
     output = resp_li[1].split('Output:')[-1].strip()
-    return query_type, output
+    return query_type, output,cost
 
 def get_colored_text(text, color = 'green'):
     txt = f"""Reformulated to: <span style="color: {color}; font-size: 14px;">{text}</span>"""

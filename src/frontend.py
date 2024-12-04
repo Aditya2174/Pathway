@@ -359,6 +359,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
             # Generate a response using the ConversableAgent
             response = auto_agent.generate_reply(messages=formatted_messages)
+            response = auto_agent.generate_tool_calls_reply(messages=formatted_messages)
             assistant_response = response.content
 
             # Display the response
