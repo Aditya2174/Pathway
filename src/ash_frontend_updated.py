@@ -488,7 +488,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                     response_with_h = get_history_str(st.session_state.chat_messages) + f"\nContext:\n{combined_context}"
 
                     with st.status("Generating response...", expanded=False) as status2:
-                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=respose_with_h)
+                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
                         assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
                         st.write(chat_result)
 
