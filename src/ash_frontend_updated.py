@@ -367,7 +367,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         with st.status("Analyzing user query...", expanded=False) as status1:
             # contextualized_prompt = contextualize_prompt(user_input)
             document_txt = combined_attached_text if combined_attached_text else ""
-            query_type, response = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
+            query_type, response, _ = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
             st.write(f"Query Type: {query_type}")
             st.write(f"Reformed query: {response}")
         status1.update(label=f'Query Type: {query_type}', expanded=False, state='complete')
