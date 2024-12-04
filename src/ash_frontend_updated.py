@@ -19,7 +19,8 @@ import tiktoken
 from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
-from utils import process_user_query, get_colored_text, get_history_str, hyde, get_num_tokens
+from utils import process_user_query, get_colored_text, get_history_str, hyde, get_num_tokens, classify_query
+from lsa import clustered_rag_lsa
 from gaurdrail import ChatModerator
 from huggingface_hub import login
 # from llama_index.core.agent import ReActAgent
@@ -393,6 +394,11 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             display_msg = user_input + "<br>" + green_txt_reform
             st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=display_msg))
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=response))
+
+            with st.spinner("Classifying user query..."):
+                query_class = classify_query(gemini_model, user_input, query_type)
+                print("Query Classification:", query_class)
+
             if query_type == 'direct':
                 print("Query Type: Direct")
                 if combined_attached_text:
@@ -435,34 +441,49 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 sufficient = None
                 with st.status("Retrieving data...", expanded=False) as status3:
                     try:
-                        # Initial retrieval of context
-                        retriever.similarity_top_k = 5  # Reset retrieval depth
-                        token_len = get_num_tokens(response)
-                        print(f"no of tokens: {token_len}")
-                        if(token_len<40):
-                            response = hyde(response, gemini_model)
-                        print(response)
-                        context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
-                        sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
-                        combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
-                        sufficient = evaluate_sufficiency(combined_context, response)
-                        
-                        if not sufficient:
-                            retriever.similarity_top_k += 5  # Increase retrieval depth
-                            additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
-                            additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
-                            combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
-                        
-                        sufficient = sufficient or evaluate_sufficiency(combined_context, response)
+                        if query_class in 'summary' :
+                            # Retrieval of large context & then summarizing using LSA
+                            retriever.similarity_top_k = 20  # Reset retrieval depth
+                            token_len = get_num_tokens(response)
+                            print(f"no of tokens: {token_len}")
+                            if(token_len<40):
+                                response = hyde(response, gemini_model)
+                            print(response)
+                            context_summaries = clustered_rag_lsa([doc.text for doc in retriever.retrieve(response)])
+                            context_text = "\n".join(context_summaries)
+                            sec_context_summaries = clustered_rag_lsa([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                            sec_context_text = "\n".join(sec_context_summaries)
+                            combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+                            sufficient = True
+                        else :
+                            # Initial retrieval of context
+                            retriever.similarity_top_k = 5  # Reset retrieval depth
+                            token_len = get_num_tokens(response)
+                            print(f"no of tokens: {token_len}")
+                            if(token_len<40):
+                                response = hyde(response, gemini_model)
+                            print(response)
+                            context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                            sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                            combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+                            sufficient = evaluate_sufficiency(combined_context, response)
                             
-                        if not sufficient:
-                            # Use web search tool if still insufficient
-                            search_results = web_search_with_logging(response)
-                            combined_context += f"\n\nWeb Search Results:\n{search_results}"
-                            print(f"Search result: {search_results}")
-                        
-                        sufficient = sufficient or evaluate_sufficiency(combined_context, response)
-                        st.write(combined_context)
+                            if not sufficient:
+                                retriever.similarity_top_k += 5  # Increase retrieval depth
+                                additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                                additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                                combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
+                            
+                            sufficient = sufficient or evaluate_sufficiency(combined_context, response)
+                                
+                            if not sufficient:
+                                # Use web search tool if still insufficient
+                                search_results = web_search_with_logging(response)
+                                combined_context += f"\n\nWeb Search Results:\n{search_results}"
+                                print(f"Search result: {search_results}")
+                            
+                            sufficient = sufficient or evaluate_sufficiency(combined_context, response)
+                            st.write(combined_context)
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
                 status3.update(label="Retrieval Complete!" if sufficient else "Not enough contex 🙁", expanded=False)
