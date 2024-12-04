@@ -18,7 +18,7 @@ if 'chat_messages' not in st.session_state:
 
 LANGUAGE = "english"
 
-def summarize(context_docs, sentences_count=10):
+def summarize(context_docs, sentences_count=5):
 
     SENTENCES_COUNT = sentences_count
     # The text you want to summarize
@@ -38,15 +38,12 @@ def summarize(context_docs, sentences_count=10):
         summary += str(sentence) + "\n"
     return summary
 
-def clustered_rag_lsa(llm, question, context_docs):
+def clustered_rag_lsa(context_docs, num_clusters=20, sentences_count=5):
 
     embedder = SentenceTransformer("all-MiniLM-L6-v2") 
     document_embeddings = embedder.encode(context_docs)
 
-    # Set the number of clusters
-    num_clusters = 20
-
-    # Step 2: Set up KMeans clustering with KMeans++ initialization
+    # Set up KMeans clustering with KMeans++ initialization
     kmeans_plus_plus = KMeans(n_clusters=num_clusters, init="k-means++", random_state=42)
     kmeans_plus_plus_labels = kmeans_plus_plus.fit_predict(document_embeddings)
 
@@ -58,22 +55,7 @@ def clustered_rag_lsa(llm, question, context_docs):
     summaries = []
 
     for cluster, docs in clustered_docs.items():
-        summary = summarize(docs, sentences_count=5)
+        summary = summarize(docs, sentences_count)
         summaries.append(summary)
 
-    prompt = f"""
-    Given the following summary of information retrieved from multiple documents, answer the question accurately and concisely.
-
-    Use the information in the summary to directly address the question,
-    Highlight relevant insights or facts that support the answer,
-    If applicable, provide a brief, clear explanation to clarify the answer.
-    Summaries: {summaries}
-
-    Question: {question}
-
-    Provide a concise answer based solely on the summaries above.
-    """
-
-    response = llm.complete(prompt)
-
-    return response.text
+    return summaries
