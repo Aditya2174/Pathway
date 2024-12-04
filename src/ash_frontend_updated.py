@@ -17,7 +17,7 @@ import pandas as pd
 from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
-from utils import process_user_query, get_colored_text
+from utils import process_user_query, get_colored_text, get_history_str
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
 from llama_index.embeddings.google import GeminiEmbedding
@@ -66,7 +66,8 @@ if not os.environ.get('GOOGLE_API_KEY'):
     os.environ['GOOGLE_API_KEY'] = google_api_key
 
 # Initialize the WebSearchAPI
-GOOGLE_CSE_ID = "AIzaSyBKTZOFWvwR-GMQvSEKthzOpDU86CB8Zoc"
+# GOOGLE_CSE_ID = "AIzaSyBKTZOFWvwR-GMQvSEKthzOpDU86CB8Zoc"
+google_cse_id = "d3a75edbda16e451e"
 
 tool_usage_log = {} # Dictionary to track tool usage
 
@@ -80,7 +81,8 @@ def web_search(query: str, api_key: str, cse_id: str, num_results: int = 5) -> s
     :param num_results: Number of search results to retrieve (default: 5).
     :return: A formatted string of search results or an error message.
     """
-    url = "https://customsearch.googleapis.com/customsearch/v1"
+    # url = "https://www.googleapis.com/customsearch/v1"
+    url = "https://cse.google.com/cse"
     params = {
         "key": api_key,
         "cx": cse_id,
@@ -90,6 +92,8 @@ def web_search(query: str, api_key: str, cse_id: str, num_results: int = 5) -> s
     try:
         response = requests.get(url, params=params)
         response.raise_for_status()
+        print(f"Search response: {response}")
+        print(f"Response content: {response.content}")
         data = response.json()
         items = data.get('items', [])
         if items:
@@ -118,7 +122,7 @@ def web_search_with_logging(query: str) -> str:
     :return: A formatted string of search results or an error message.
     """
     log_tool_usage("Web search tool", query)
-    return web_search(query, api_key=google_api_key, cse_id=GOOGLE_CSE_ID)
+    return web_search(query, api_key=google_api_key, cse_id=google_cse_id)
 
 # Constants/Configurations
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -174,13 +178,13 @@ if 'sec_store' not in st.session_state:
 agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query. The user may reference documents they provided, which will be given to you as context.\
     You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary.\
         If extra information is needed to answer the question, use a web search."
-executor = LocalCommandLineCodeExecutor(work_dir="coding")
+executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15)
 auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt,
                                 llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
 user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
-                            default_auto_reply="If you have any new information, state it, otherwise indicate that you are ready for the next query.")
+                            default_auto_reply="If you have any more important information to add, add it. Otheriwse, respond with 'done'")
 
 # register_function(web_search_with_logging, caller=auto_agent, executor=user_proxy, name="search_tool", description="A tool to search the web and fetch information.")
 
@@ -367,7 +371,9 @@ if user_input := st.chat_input("Enter your chat prompt:"):
     elif query_type == "direct":
         with st.spinner("Providing direct response..."):
             try:
-                chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response)
+                response_with_h = get_history_str(st.session_state.chat_messages)
+                combined_attached_text = combined_attached_text if combined_attached_text else ""
+                chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
                 assistant_responses = []
 
                 for message in chat_result.chat_history:
@@ -414,7 +420,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                                 role=MessageRole.ASSISTANT,
                                 content=(
                                     "I couldn't find sufficient context to fully answer your query based on available documents and web search. "
-                                    "You may refine your query for better results."
+                                    "Please provide a clarified query."
                                 ),
                             )
                             st.session_state.chat_messages.append(assistant_message)
@@ -427,8 +433,8 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                                 for msg in st.session_state.chat_messages
                             ]
                             formatted_messages.append({"role": "user", "content": f"{response}\nContext:\n{combined_context}"})
-
-                            chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=f"{response}\nContext:\n{combined_context}")
+                            response_with_h = get_history_str(st.session_state.chat_messages) + f"\nContext:\n{combined_context}"
+                            chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
                             assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
 
                             # Combine all assistant responses into one message
@@ -439,11 +445,6 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
                             with st.chat_message("assistant"):
                                 st.markdown(unified_response, unsafe_allow_html=True)
-
-                            # response = auto_agent.generate_reply(messages=formatted_messages)['content']
-                            # st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
-                            # with st.chat_message("assistant"):
-                            #     st.markdown(response, unsafe_allow_html=True)
 
             except Exception as e:
                 st.error(f"An error occurred: {e}")
