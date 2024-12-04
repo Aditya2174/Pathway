@@ -54,7 +54,6 @@ def evaluate_sufficiency(context_text: str, query: str) -> bool:
         time.sleep(1)
         # result = gemini_model.generate_response(evaluation_prompt)
         result = gemini_model.chat([ChatMessage(content=evaluation_prompt, role=MessageRole.USER)])
-        print(type(result.message.content))
         if 'no' in result.message.content.lower():
             return False
         return True
@@ -81,7 +80,7 @@ def web_search(query: str, api_key: str, cse_id: str, num_results: int = 5) -> s
     :param num_results: Number of search results to retrieve (default: 5).
     :return: A formatted string of search results or an error message.
     """
-    url = "https://www.googleapis.com/customsearch/v1"
+    url = "https://customsearch.googleapis.com/customsearch/v1"
     params = {
         "key": api_key,
         "cx": cse_id,
@@ -144,10 +143,9 @@ def cleanup_cache():
 
 atexit.register(cleanup_cache)
 
-if not os.path.exists("coding/"):
-    os.makedirs("coding")
-# Initialize a Gemini-1.5-Flash model with LlamaIndex
-gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)
+os.makedirs("coding", exist_ok=True)    # Create a working directory for code executor
+
+gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)  # Initialize a Gemini-1.5-Flash model with LlamaIndex
 
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT, similarity_top_k=5)
 
@@ -181,7 +179,8 @@ auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system
                                 llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
-user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor})
+user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
+                            default_auto_reply="If you have any new information, state it, otherwise indicate that you are ready for the next query.")
 
 # register_function(web_search_with_logging, caller=auto_agent, executor=user_proxy, name="search_tool", description="A tool to search the web and fetch information.")
 
@@ -385,74 +384,67 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             except Exception as e:
                 st.error(f"An error occurred: {e}")
 
+    # Handle responses based on query type
     elif query_type == "context":
         with st.spinner("Retrieving information"):
             try:
-                # Retrieve contexts
+                # Initial retrieval of context
+                retriever.similarity_top_k = 5  # Reset retrieval depth
                 context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
                 sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
                 combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
 
-                # Retrieve a fixed number of chunks initially
-                max_chunks_per_retrieval = 3
-                context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
-                sec_context_text = "\n".join(
-                    [doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)]
-                )
-                combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
-
-                # Evaluate if the initial context is sufficient
+                # Evaluate sufficiency
                 if not evaluate_sufficiency(combined_context, response):
-                    additional_chunks_retrieved = 0
-                    max_iterations = 2  # Max number of iterative retrievals
-                    for _ in range(max_iterations):
-                        # Retrieve more chunks iteratively
-                        additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
-                        additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
-                        additional_chunks_retrieved += 1
-                        combined_context = f"Database Context:\n{additional_context}"
-                        combined_context += f"\n\nAdditional User Document Context:\n{additional_sec_context}"
+                    retriever.similarity_top_k += 5  # Increase retrieval depth
+                    additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                    additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                    combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
 
-                        # Re-evaluate sufficiency
-                        if evaluate_sufficiency(combined_context, response):
-                            break
-
-                    # If still insufficient, involve the human
+                    # Re-evaluate sufficiency
                     if not evaluate_sufficiency(combined_context, response):
-                        st.warning("The retrieved context appears insufficient. Please review the following context and refine your query:")
-                        st.text(combined_context)
-                        st.stop()
+                        # Use web search tool if still insufficient
+                        search_results = web_search_with_logging(response)
+                        combined_context += f"\n\nWeb Search Results:\n{search_results}"
+                        print(f"Search result: {search_results}")
+                        # Final sufficiency check
+                        if not evaluate_sufficiency(combined_context, response):
+                            # Notify the user about insufficiency
+                            assistant_message = ChatMessage(
+                                role=MessageRole.ASSISTANT,
+                                content=(
+                                    "I couldn't find sufficient context to fully answer your query based on available documents and web search. "
+                                    "You may refine your query for better results."
+                                ),
+                            )
+                            st.session_state.chat_messages.append(assistant_message)
+                            with st.chat_message("assistant"):
+                                st.markdown(assistant_message.content)
+                        else:
+                            # Process sufficient context
+                            formatted_messages = [
+                                {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
+                                for msg in st.session_state.chat_messages
+                            ]
+                            formatted_messages.append({"role": "user", "content": f"{response}\nContext:\n{combined_context}"})
 
-                        # If human refinement is also insufficient, use search tool
-                        with st.spinner("Using search tool for additional context..."):
-                            search_results = web_search_with_logging(response)
-                            combined_context += f"\n\nWeb Search Results:\n{search_results}"
-                            if not evaluate_sufficiency(combined_context, response):
-                                st.error("Unable to find sufficient information to answer the query.")
-                                st.stop()
+                            chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=f"{response}\nContext:\n{combined_context}")
+                            assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
 
-                # Format messages for the assistant
-                formatted_messages = [
-                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                    for msg in st.session_state.chat_messages
-                ]
-                formatted_messages.append({"role": "user", "content": f"{response}\nContext:\n{combined_context}"})
+                            # Combine all assistant responses into one message
+                            unified_response = "\n\n".join(assistant_responses)
+                            assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
 
-                # chat_result = auto_agent.generate_reply(messages=formatted_messages)
-                chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=f"{response}\nContext:\n{combined_context}")
-                assistant_responses = []
+                            st.session_state.chat_messages.append(assistant_message)
 
-                for message in chat_result.chat_history:
-                    if message['name'] == "assistant":
-                        assistant_responses.append(message['content'])
+                            with st.chat_message("assistant"):
+                                st.markdown(unified_response, unsafe_allow_html=True)
 
-                # Combine all assistant responses into one message
-                unified_response = "\n\n".join(assistant_responses)
-                assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
-                st.session_state.chat_messages.append(assistant_message)
-                
-                with st.chat_message("assistant"):
-                    st.markdown(unified_response, unsafe_allow_html=True)
+                            # response = auto_agent.generate_reply(messages=formatted_messages)['content']
+                            # st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
+                            # with st.chat_message("assistant"):
+                            #     st.markdown(response, unsafe_allow_html=True)
+
             except Exception as e:
                 st.error(f"An error occurred: {e}")
     else:
