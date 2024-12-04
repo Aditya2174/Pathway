@@ -196,8 +196,6 @@ auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system
 user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
                             default_auto_reply="If you have any more important information to add, add it. Otheriwse, respond with 'done'")
 
-# register_function(web_search_with_logging, caller=auto_agent, executor=user_proxy, name="search_tool", description="A tool to search the web and fetch information.")
-
 register_function(
     search_tool,
     caller=auto_agent,
@@ -349,9 +347,6 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         st.session_state.message_counter += 1
         st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
 
-        # Add user message to chat history
-        # user_message = ChatMessage(role=MessageRole.USER, content=user_input)
-        # st.session_state.chat_messages.append(user_message)
         with st.chat_message("user"):
             st.markdown(user_input)
 
@@ -366,7 +361,6 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 ]
                 st.write("Summarised History:\n"+st.session_state.summarized_history)
             status0.update(label="Summarized successfully", expanded=False)
-
 
         full_prompt = f"{user_input}\n\nAttached Document: {combined_attached_text}" if combined_attached_text else user_input
         with st.status("Analyzing user query...", expanded=False) as status1:
@@ -455,7 +449,8 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                             
                         if not sufficient:
                             # Use web search tool if still insufficient
-                            search_results = web_search_with_logging(response)
+                            # search_results = web_search_with_logging(response)
+                            search_results = search_tool(response)
                             combined_context += f"\n\nWeb Search Results:\n{search_results}"
                             print(f"Search result: {search_results}")
                         
@@ -498,6 +493,43 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                     with st.chat_message("assistant"):
                         st.markdown(unified_response, unsafe_allow_html=True)
                     status2.update(label="Generation Complete!", expanded=False)
+            elif query_type == 'code_execution':
+                print("Query Type: Code Execution")
+                if combined_attached_text:
+                    # Modify the last message in the session state to include document context
+                    last_message = st.session_state.chat_messages[-1]
+                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{combined_attached_text}"
+
+                formatted_messages = [
+                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
+                    for msg in st.session_state.chat_messages
+                ]
+                response_with_h = get_history_str(st.session_state.chat_messages)
+                combined_attached_text = combined_attached_text if combined_attached_text else ""
+                with st.status("Generating response...", expanded=False) as status2:
+                    st.write("Query Type: Direct")
+                    try:
+                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
+                        assistant_responses = []
+
+                        for message in chat_result.chat_history:
+                            if message['name'] == "assistant":
+                                assistant_responses.append(message['content'])
+
+                        # Combine all assistant responses into one message
+                        unified_response = "\n\n".join(assistant_responses)
+                        assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
+                        st.markdown(unified_response, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"An error occurred: {e}")
+
+                
+                with st.chat_message("assistant"):
+                    st.markdown(unified_response, unsafe_allow_html=True)
+                st.session_state.chat_messages.append(assistant_message)
+                st.session_state.chat_messages_display.append(assistant_message)
+                status2.update(label="Generation Complete!", expanded=False)
+
             else:
                 print("Invalid response type detected:", query_type)
                 st.error("Invalid response type detected. Please try again.")
