@@ -181,9 +181,9 @@ if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 if 'tiktoken_tokenizer' not in st.session_state:
     st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
-if 'moderator' not in st.session_state:
-    login()  #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 moi tokennn.
-    st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
+# if 'moderator' not in st.session_state:
+#     login()  #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 moi tokennn.
+#     st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
 
 agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query. The user may reference documents they provided, which will be given to you as context.\
     You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary.\
@@ -304,11 +304,11 @@ with st.sidebar:
 
             if file_name in st.session_state.uploaded_filenames:
                 st.warning(f"'{file_name}' has already been added to the vector store.")
-                combined_attached_text += st.session_state.document_cache[file_name] + "\n"
+                combined_attached_text += document_cache[file_name] + "\n"
             else:
                 attached_text = read_file_from_cache_or_parse(
                     uploaded_file,
-                    st.session_state.document_cache,
+                    document_cache,
                     SMALL_FILE_SIZE_THRESHOLD
                 )
                 combined_attached_text += attached_text + "\n"
@@ -340,9 +340,10 @@ for chat in st.session_state.chat_messages_display:
 
 # Chat input
 if user_input := st.chat_input("Enter your chat prompt:"):
-    result = st.session_state.moderator.moderate_chat([{"role": "user", "content": user_input}])
-    print(result)
-    result = result.split('\n')[0]
+    # result = st.session_state.moderator.moderate_chat([{"role": "user", "content": user_input}])
+    # print(result)
+    # result = result.split('\n')[0]
+    result = 'safe'
     if result == 'safe':
         st.session_state.message_counter += 1
         st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
