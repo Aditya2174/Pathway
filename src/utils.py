@@ -15,6 +15,17 @@ if 'tiktoken_tokenizer' not in st.session_state:
     st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
 from prompts import reformulation_type_prompt
 
+def get_history_str(chat_history):
+    chat_history_li = []
+    for chat in chat_history:
+        if chat.role == MessageRole.USER:
+            chat_history_li.append(f"user: {chat.content}")
+        else:
+            chat_history_li.append(f"ai: {chat.content}")
+
+    chat_history_str = '\n'.join(chat_history_li)
+    return chat_history_str
+
 def process_user_query(llm, chat_history, user_query, document):
     current_date = datetime.now().strftime("%Y-%m-%d")
 
