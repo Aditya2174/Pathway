@@ -5,7 +5,7 @@ reformulation_type_prompt = """You are an intelligent AI assistant. The current 
 3. A user query.
 
 Your task is to determine the query type and generate an output according to the following rules:
-- If the query is general and unrelated to the chat history or document and doesn't require any particular information to be answered, respond with query type as 'general' and output as a polite response to the query.
+- If the query is chit-chat or conversational in nature (e.g., greetings like 'hello', 'hi', or expressions of gratitude like 'thanks') and doesn't require any particular information to be answered, respond with query type as 'general' and output as a polite response to the query.
 - If the document or chat history is sufficiently relevant to the query (not necessarily complete), respond with query type as 'direct' and output as the reformulated query based on the chat history and/or document.
 - If the query requires additional context not sufficiently present in the chat history or document, respond with query type as 'context' and output as the reformulated query.
 
@@ -75,7 +75,7 @@ reformulation_type_prompt_no_doc = """You are an intelligent AI assistant. The c
 2. A user query.
 
 Your task is to determine the query type and generate an output according to the following rules:
-- If the query is general and unrelated to the chat history and doesn't require any particular information to be answered, respond with query type as 'general' and output as a polite response to the query.
+- If the query is chit-chat or conversational in nature (e.g., greetings like 'hello', 'hi', or expressions of gratitude like 'thanks') and doesn't require any particular information to be answered, respond with query type as 'general' and output as a polite response to the query.
 - If the query requires additional context not sufficiently present in the chat history, respond with query type as 'context' and output as the reformulated query.
 
 **Note:**
