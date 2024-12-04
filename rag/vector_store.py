@@ -299,7 +299,7 @@ pw.io.fs.read('./sample_docs', format='binary', mode='static', with_metadata=Tru
             #     for ret in rets:
             #         f.write(f"text: {ret[0]}, metadata: {metadata | ret[1]}\n")
             
-            with open("chunked_docs_combined.json", "a+") as f:
+            with open("chunked_docs_combined_sliding_window_tokens.json", "a+") as f:
                 json.dump({"metadata": metadata, "rets": rets}, f, indent=4)
                 f.write("\n")
             # print(f'Chunked documents: {rets}')

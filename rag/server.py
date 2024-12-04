@@ -2,9 +2,9 @@ import pathway as pw
 import os
 # from pathway.xpacks.llm.vector_store import VectorStoreServer
 from sentence_transformers import SentenceTransformer
-from splitter import SmallToBigSentenceSplitter , SlidingWindowSentenceSplitter
+from splitter import DefaultTokenCountSplitter , SlidingWindowSplitter
 from vector_store import VectorStoreServer
-from pathway.xpacks.llm.splitters import TokenCountSplitter
+from pathway.xpacks.llm.splitters import TokenCountSplitter 
 from pathway.xpacks.llm.embedders import BaseEmbedder , SentenceTransformerEmbedder
 from pathway.xpacks.llm.parsers import ParseUtf8, ParseUnstructured
 
@@ -12,14 +12,14 @@ if 'TESSDATA_PREFIX' not in os.environ:
     os.environ['TESSDATA_PREFIX'] = '/usr/local/share/tessdata'
 
 data_sources = pw.io.fs.read(
-    "data",
+    "../test",
     format="binary",
     mode="streaming",
     with_metadata=True,
 )
 
 
-splitter = SmallToBigSentenceSplitter()
+splitter = SlidingWindowSplitter()
 embedder = SentenceTransformerEmbedder(model ='all-MiniLM-L6-v2')
 parser = ParseUnstructured() # must have libmagic in system to use this
 
