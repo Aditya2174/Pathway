@@ -3,6 +3,7 @@ import streamlit as st
 
 # For file-related purposes
 import os
+import time
 import shutil
 from typing import Annotated
 import diskcache as dc
@@ -41,6 +42,22 @@ tavily = TavilyClient(tavily_api_key)
 
 def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
     return tavily.get_search_context(query=query, search_depth="advanced")
+
+def evaluate_sufficiency(context_text: str, query: str) -> bool:
+        """Use Gemini model to evaluate if the retrieved context suffices to answer the query."""
+        evaluation_prompt = (
+            f"Question: {query}\n\n"
+            f"Context:\n{context_text}\n\n"
+            "Does the context provide sufficient information to fully answer the question?"
+            "Respond with 'Yes' or 'No' only."
+        )
+        time.sleep(1)
+        # result = gemini_model.generate_response(evaluation_prompt)
+        result = gemini_model.chat([ChatMessage(content=evaluation_prompt, role=MessageRole.USER)])
+        print(type(result.message.content))
+        if 'no' in result.message.content.lower():
+            return False
+        return True
 
 if not os.environ.get('AUTOGEN_USE_DOCKER'):
     os.environ['AUTOGEN_USE_DOCKER'] = '0'
@@ -132,7 +149,7 @@ if not os.path.exists("coding/"):
 # Initialize a Gemini-1.5-Flash model with LlamaIndex
 gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)
 
-retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT)
+retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT, similarity_top_k=5)
 
 # Initialize session variables
 if 'chat_messages' not in st.session_state:
@@ -375,6 +392,44 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
                 sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
                 combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+
+                # Retrieve a fixed number of chunks initially
+                max_chunks_per_retrieval = 3
+                context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                sec_context_text = "\n".join(
+                    [doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)]
+                )
+                combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+
+                # Evaluate if the initial context is sufficient
+                if not evaluate_sufficiency(combined_context, response):
+                    additional_chunks_retrieved = 0
+                    max_iterations = 2  # Max number of iterative retrievals
+                    for _ in range(max_iterations):
+                        # Retrieve more chunks iteratively
+                        additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                        additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                        additional_chunks_retrieved += 1
+                        combined_context = f"Database Context:\n{additional_context}"
+                        combined_context += f"\n\nAdditional User Document Context:\n{additional_sec_context}"
+
+                        # Re-evaluate sufficiency
+                        if evaluate_sufficiency(combined_context, response):
+                            break
+
+                    # If still insufficient, involve the human
+                    if not evaluate_sufficiency(combined_context, response):
+                        st.warning("The retrieved context appears insufficient. Please review the following context and refine your query:")
+                        st.text(combined_context)
+                        st.stop()
+
+                        # If human refinement is also insufficient, use search tool
+                        with st.spinner("Using search tool for additional context..."):
+                            search_results = web_search_with_logging(response)
+                            combined_context += f"\n\nWeb Search Results:\n{search_results}"
+                            if not evaluate_sufficiency(combined_context, response):
+                                st.error("Unable to find sufficient information to answer the query.")
+                                st.stop()
 
                 # Format messages for the assistant
                 formatted_messages = [
