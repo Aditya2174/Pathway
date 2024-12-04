@@ -20,10 +20,8 @@ from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
 from utils import process_user_query, get_colored_text, get_history_str, hyde, get_num_tokens
-from gaurdrail import ChatModerator
+from guardrail import ChatModerator
 from huggingface_hub import login
-# from llama_index.core.agent import ReActAgent
-# from llama_index.tools.tavily_research import TavilyToolSpec
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
 from llama_index.embeddings.google import GeminiEmbedding
