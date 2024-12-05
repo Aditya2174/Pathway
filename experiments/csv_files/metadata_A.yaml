@@ -1,0 +1,59 @@
+# This is the metadata of a csv file which contains the file name: 'A.csv', description of these columns generated using pandas: ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'] and the first two rows of data.
+File Name: A.csv
+Columns:
+  Date:
+    count: 5124
+    unique: 5124
+    top: '1999-11-18'
+    freq: 1
+  Open:
+    count: 5124.0
+    mean: 34.090255144608385
+    std: 18.608831057161247
+    min: 7.653790950775146
+    max: 111.58798217773438
+  High:
+    count: 5124.0
+    mean: 34.5605534035
+    std: 18.834528048965524
+    min: 7.961373329162598
+    max: 115.87982940673828
+  Low:
+    count: 5124.0
+    mean: 33.62946732922702
+    std: 18.38171763230412
+    min: 7.510729789733887
+    max: 103.71959686279295
+  Close:
+    count: 5124.0
+    mean: 34.10624468791866
+    std: 18.611594591891883
+    min: 7.761087417602539
+    max: 113.73390197753906
+  Adj Close:
+    count: 5124.0
+    mean: 31.778674302298423
+    std: 18.730528604142116
+    min: 6.674886226654053
+    max: 97.8163070678711
+  Volume:
+    count: 5124.0
+    mean: 3693249.9804839967
+    std: 2481855.3914437983
+    min: 271900.0
+    max: 62546300.0
+Data (first two rows):
+- Date: '1999-11-18'
+  Open: 32.54649353027344
+  High: 35.765380859375
+  Low: 28.612302780151367
+  Close: 31.473533630371094
+  Adj Close: 27.06866455078125
+  Volume: 62546300
+- Date: '1999-11-19'
+  Open: 30.713520050048828
+  High: 30.75822639465332
+  Low: 28.47818374633789
+  Close: 28.880542755126957
+  Adj Close: 24.83857727050781
+  Volume: 15234100
