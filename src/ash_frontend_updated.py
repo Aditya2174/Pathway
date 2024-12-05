@@ -65,7 +65,7 @@ tavily = TavilyClient(tavily_api_key)
 def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
     return tavily.get_search_context(query=query, search_depth="advanced")
 from typing import Tuple
-def evaluate_sufficiency(context_text: str, query: str, total_cost :int) -> Tuple[bool, int]:
+def evaluate_sufficiency(context_text: str, query: str) -> Tuple[bool, int]:
         """Use Gemini model to evaluate if the retrieved context suffices to answer the query."""
         evaluation_prompt = (
             f"Question: {query}\n\n"
@@ -73,7 +73,6 @@ def evaluate_sufficiency(context_text: str, query: str, total_cost :int) -> Tupl
             "Does the context provide sufficient information to fully answer the question?"
             "Respond with 'Yes' or 'No' only."
         )
-        time.sleep(1)
         # result = gemini_model.generate_response(evaluation_prompt)
         result = gemini_model.chat([ChatMessage(content=evaluation_prompt, role=MessageRole.USER)])
         cost = result.raw['usage_metadata']['total_token_count']
@@ -363,6 +362,7 @@ for chat in st.session_state.chat_messages_display:
 
 from typing import Dict
 def solve_user_query(user_input:str) -> Dict[str, str]:
+    total_cost = 0
     global combined_attached_text
     output = dict()
     result = 'safe'    
@@ -472,7 +472,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
                             if(token_len<40):
-                                response = hyde(response, gemini_model)
+                                response, cost = hyde(response, gemini_model)
                             print(response)
                             st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in retriever.retrieve(response)])}")
                             context_summaries = clustered_rag_lsa([doc.text for doc in retriever.retrieve(response)], num_clusters=20, sentences_count=3)

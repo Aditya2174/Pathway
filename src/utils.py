@@ -82,10 +82,11 @@ def classify_query(llm, user_query, query_type):
     return query_type
 
 def hyde(input_query, model) -> Tuple[str, int]:
-    query = "Expand the given query into a document for retrieval. Do not add any numerical information or ask for clarification or make unnecessary changes.\n"+input_query
+    input_query = input_query.replace('#','').replace('\n\n','')
+    query = "Expand the given query into a text document for retrieval. Do not add any numerical information or ask for clarification or make unnecessary changes.\n"+input_query
     result = model.complete(query, generation_config={'max_output_tokens':200,"temperature":0.2})
     query_doc = result.text
     cost = result.raw['usage_metadata']['total_token_count']
     
-    return f"{input_query}\n {query_doc}", cost
+    return f"{input_query}\n{query_doc}", cost
     
