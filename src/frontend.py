@@ -10,7 +10,6 @@ from typing import Annotated
 import diskcache as dc
 import atexit
 import json
-import requests
 import pdfplumber
 import pandas as pd
 import tiktoken
