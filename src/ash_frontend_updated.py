@@ -14,6 +14,7 @@ import requests
 import pdfplumber
 import pandas as pd
 import tiktoken
+import traceback
 from datetime import datetime
 
 # All LlamaIndex tools needed...LLM, memory, roles, etc
@@ -52,8 +53,12 @@ from tavily import TavilyClient
 
 # Tavily search tool setup
 tavily_api_key = "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"
+hf_token = "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"
 if not os.environ.get('TAVILY_API_KEY'):
     os.environ['TAVILY_API_KEY'] = tavily_api_key
+
+if not os.environ.get('HF_TOKEN'):
+    os.environ['HF_TOKEN'] = hf_token
 
 tavily = TavilyClient(tavily_api_key)
 
@@ -157,6 +162,10 @@ PATHWAY_PORT = 8756
 cache_dir = './document_cache'
 document_cache = dc.Cache(cache_dir)
 
+if "document_cache" not in st.session_state:
+    st.session_state.document_cache = {}  # Initialize with a default value
+
+
 # Register cleanup function to delete cache on termination
 def cleanup_cache():
     if os.path.exists(cache_dir):
@@ -195,9 +204,9 @@ if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 if 'tiktoken_tokenizer' not in st.session_state:
     st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
-# if 'moderator' not in st.session_state:
-#     login()  #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 moi tokennn.
-#     st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
+if 'moderator' not in st.session_state:
+    # login()  #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 moi tokennn.
+    st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
 
 executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15)
 agent_model_name = "gemini-1.5-flash"
@@ -387,6 +396,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
             total_token_cost += cost
             st.write(f"Query Type: {query_type}")
             st.write(f"Reformed query: {response}")
+            st.write(f"Token cost: {cost}")
         status1.update(label=f'Query Type: {query_type}', expanded=False, state='complete')
 
         # Handle responses based on query type
@@ -405,9 +415,10 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
             st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=display_msg))
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=response))
 
-            with st.spinner("Classifying user query..."):
+            with st.status(label="Classifying user query...", expanded=False) as status5:
                 query_class = classify_query(gemini_model, user_input, query_type)
-                print("Query Classification:", query_class)
+                st.write("Query Classification:", query_class)
+            status5.update(label=f'Query class: {query_class}')
 
             if query_type == 'direct':
                 print("Query Type: Direct")
@@ -457,18 +468,23 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                     try:
                         if query_class in 'summary' :
                             # Retrieval of large context & then summarizing using LSA
-                            retriever.similarity_top_k = 20  # Reset retrieval depth
+                            retriever.similarity_top_k = 50  # Reset retrieval depth
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
                             if(token_len<40):
                                 response = hyde(response, gemini_model)
                             print(response)
-                            context_summaries = clustered_rag_lsa([doc.text for doc in retriever.retrieve(response)])
+                            st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in retriever.retrieve(response)])}")
+                            context_summaries = clustered_rag_lsa([doc.text for doc in retriever.retrieve(response)], num_clusters=20, sentences_count=3)
                             context_text = "\n".join(context_summaries)
-                            sec_context_summaries = clustered_rag_lsa([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                            st.write(f"Retrieved Document context size: {sum([get_num_tokens(doc.text) for doc in st.session_state.sec_store.as_retriever().retrieve(response)])}")
+                            document_context = [doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)]
+                            sec_context_summaries = clustered_rag_lsa(document_context, num_clusters=int(len(document_context)*0.5), sentences_count=5)
                             sec_context_text = "\n".join(sec_context_summaries)
                             combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
-                            sufficient = True
+                            st.write(f"LSA token count: {get_num_tokens(combined_context)}")
+                            st.write(combined_context)
+                            sufficient = evaluate_sufficiency(combined_context, response)
                         else :
                             # Initial retrieval of context
                             retriever.similarity_top_k = 5  # Reset retrieval depth
@@ -514,6 +530,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                         st.write(combined_context)
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
+                        traceback.print_exc()
                 status3.update(label="Retrieval Complete!" if sufficient else "Not enough contex 🙁", expanded=False)
 
                 if not sufficient:

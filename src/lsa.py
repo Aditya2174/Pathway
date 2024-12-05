@@ -38,9 +38,11 @@ def summarize(context_docs, sentences_count=5):
         summary += str(sentence) + "\n"
     return summary
 
-def clustered_rag_lsa(context_docs, num_clusters=20, sentences_count=5):
+def clustered_rag_lsa(context_docs, num_clusters=5, sentences_count=5):
 
     embedder = SentenceTransformer("all-MiniLM-L6-v2") 
+    if context_docs == []:
+        return context_docs
     document_embeddings = embedder.encode(context_docs)
 
     # Set up KMeans clustering with KMeans++ initialization

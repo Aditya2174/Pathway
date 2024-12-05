@@ -21,10 +21,10 @@ RUN apt install -y libprotobuf-dev protobuf-compiler
 RUN apt-get update && apt-get -y install cmake
 
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+ENV PATH="/root/.cargo/bin:$PATH"
 RUN poetry run python -m pip install --upgrade pip
 RUN poetry install
-RUN poetry run python -m pip install torch
+RUN poetry run python -m pip install -U torch
 RUN poetry run python -m pip install -e "PathwayPS[all]"
 RUN poetry install && rm -rf ${POETRY_CACHE_DIR}
 
