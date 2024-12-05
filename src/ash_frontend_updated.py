@@ -269,11 +269,57 @@ def extract_non_table_text(page):
 
     return non_table_text.strip()
 
+LARGE_FILE_DIRECTORY = '../data/'
+
 def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold):
     """Reads a file from cache if available, otherwise parses it."""
     file_name = uploaded_file.name
     file_type = uploaded_file.type
 
+    # Check if the file is large and needs to be stored in the large file directory
+    if uploaded_file.size > file_size_threshold:
+        large_file_path = os.path.join(LARGE_FILE_DIRECTORY, file_name)
+        with open(large_file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.warning(f"Large file '{file_name}' saved to directory. Only partial content is being processed.")
+
+        # Process limited content based on file type
+        if file_type == "application/pdf":
+            attached_text = ""
+            with pdfplumber.open(large_file_path) as pdf:
+                for page in pdf.pages[:2]:  # Limit to the first 2 pages
+                    non_table_text = extract_non_table_text(page)
+                    attached_text += non_table_text + "\n"
+
+        elif file_type == "text/plain":
+            with open(large_file_path, "r", encoding="utf-8") as f:
+                attached_text = f.read(1000)  # Limit to the first 1000 characters
+
+        elif file_type == "application/json":
+            with open(large_file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            attached_text = json.dumps(data, indent=2)[:1000]  # Limit JSON preview to 1000 characters
+
+        elif file_type == "text/csv":
+            df = pd.read_csv(large_file_path)
+            preview = df.head()
+            attached_text = f"""
+            File Size: {uploaded_file.size / (1024 * 1024):.2f} MB
+            Number of Rows: {df.shape[0]}
+            Number of Columns: {df.shape[1]}
+            Columns: {', '.join(df.columns)}
+            Preview: {preview.to_string()}
+            """
+            st.write("Preview of Data:")
+            st.dataframe(df.head(10))
+        else:
+            attached_text = f"File type '{file_type}' not supported for partial processing."
+
+        # Add the limited content to the cache
+        cache[file_name] = attached_text
+        return attached_text
+
+    # If the file is not large, process normally
     if file_name in cache:
         st.success(f"Loaded cached document: {file_name}")
         return cache[file_name]
@@ -353,7 +399,7 @@ with st.sidebar:
                 st.session_state.uploaded_filenames.add(file_name)
 
                 st.success(f"Document '{file_name}' added to the secondary vector store!")
-
+                
 # Initialize state variables
 if "displayed_message_contents" not in st.session_state:
     st.session_state.displayed_message_contents = set()
