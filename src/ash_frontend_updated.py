@@ -46,8 +46,8 @@ tavily = TavilyClient(tavily_api_key)
 
 def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
     return tavily.get_search_context(query=query, search_depth="advanced")
-
-def evaluate_sufficiency(context_text: str, query: str) -> bool:
+from typing import Tuple
+def evaluate_sufficiency(context_text: str, query: str, total_cost :int) -> Tuple[bool, int]:
         """Use Gemini model to evaluate if the retrieved context suffices to answer the query."""
         evaluation_prompt = (
             f"Question: {query}\n\n"
@@ -58,9 +58,10 @@ def evaluate_sufficiency(context_text: str, query: str) -> bool:
         time.sleep(1)
         # result = gemini_model.generate_response(evaluation_prompt)
         result = gemini_model.chat([ChatMessage(content=evaluation_prompt, role=MessageRole.USER)])
+        cost = result.raw['usage_metadata']['total_token_count']
         if 'no' in result.message.content.lower():
-            return False
-        return True
+            return False, cost
+        return True, cost
 
 if not os.environ.get('AUTOGEN_USE_DOCKER'):
     os.environ['AUTOGEN_USE_DOCKER'] = '0'
@@ -189,8 +190,10 @@ agent_system_prompt = "Respond concisely and accurately, using the conversation 
     You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary.\
         If extra information is needed to answer the question, use a web search."
 executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15)
+agent_model_name = "gemini-1.5-flash"
+
 auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt,
-                                llm_config={"config_list": [{"model": "gemini-1.5-flash", "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
+                                llm_config={"config_list": [{"model": agent_model_name, "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
 user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
@@ -288,6 +291,7 @@ def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold):
     cache[file_name] = attached_text
     return attached_text
 
+combined_attached_text = ""
 # Document uploader for including document text in the chat prompt
 with st.sidebar:
     st.subheader("Upload Documents")
@@ -338,12 +342,14 @@ for chat in st.session_state.chat_messages_display:
     with st.chat_message(role):
         st.markdown(chat.content, unsafe_allow_html=True)
 
-# Chat input
-if user_input := st.chat_input("Enter your chat prompt:"):
-    # result = st.session_state.moderator.moderate_chat([{"role": "user", "content": user_input}])
-    # print(result)
-    # result = result.split('\n')[0]
-    result = 'safe'
+from typing import Dict
+def solve_user_query(user_input:str) -> Dict[str, str]:
+    global combined_attached_text
+    output = dict()
+    result = 'safe'    
+    combined_context = ""
+    llm_calls = 1
+    total_token_cost = 0
     if result == 'safe':
         st.session_state.message_counter += 1
         st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
@@ -367,7 +373,8 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         with st.status("Analyzing user query...", expanded=False) as status1:
             # contextualized_prompt = contextualize_prompt(user_input)
             document_txt = combined_attached_text if combined_attached_text else ""
-            query_type, response, _ = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
+            query_type, response, cost = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
+            total_token_cost += cost
             st.write(f"Query Type: {query_type}")
             st.write(f"Reformed query: {response}")
         status1.update(label=f'Query Type: {query_type}', expanded=False, state='complete')
@@ -375,6 +382,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         # Handle responses based on query type
         if query_type == "general":
             assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=response)
+            stored_response = response
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
             st.session_state.chat_messages.append(assistant_message)
             st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=user_input))
@@ -402,15 +410,19 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 with st.status("Generating response...", expanded=False) as status2:
                     st.write("Query Type: Direct")
                     try:
+                        
                         chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
                         assistant_responses = []
 
                         for message in chat_result.chat_history:
                             if message['name'] == "assistant":
+                                llm_calls += 1
                                 assistant_responses.append(message['content'])
 
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
+                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
+                        stored_response = unified_response
                         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
                         st.markdown(unified_response, unsafe_allow_html=True)
                     except Exception as e:
@@ -433,20 +445,28 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                         token_len = get_num_tokens(response)
                         print(f"no of tokens: {token_len}")
                         if(token_len<40):
-                            response = hyde(response, gemini_model)
+                            response, cost = hyde(response, gemini_model)
+                            total_token_cost += cost
                         print(response)
                         context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
                         sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
                         combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
-                        sufficient = evaluate_sufficiency(combined_context, response)
+                        llm_calls += 1
+                        sufficient, cost = evaluate_sufficiency(combined_context, response)
                         
                         if not sufficient:
                             retriever.similarity_top_k += 5  # Increase retrieval depth
                             additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
                             additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
                             combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
+                            llm_calls += 1 # add an llm call as not sufficient
                         
-                        sufficient = sufficient or evaluate_sufficiency(combined_context, response)
+                        
+                        tup = sufficient or evaluate_sufficiency(combined_context, response)
+                        if not sufficient:
+                            sufficient = tup[0]
+                            cost = tup[1]
+                            total_token_cost += cost
                             
                         if not sufficient:
                             # Use web search tool if still insufficient
@@ -454,8 +474,13 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                             search_results = search_tool(response)
                             combined_context += f"\n\nWeb Search Results:\n{search_results}"
                             print(f"Search result: {search_results}")
-                        
-                        sufficient = sufficient or evaluate_sufficiency(combined_context, response)
+                            llm_calls += 1
+                            
+                        tup = sufficient or evaluate_sufficiency(combined_context, response)
+                        if not sufficient:
+                            sufficient = tup[0]
+                            cost = tup[1]
+                            total_token_cost += cost
                         st.write(combined_context)
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
@@ -463,13 +488,16 @@ if user_input := st.chat_input("Enter your chat prompt:"):
 
                 if not sufficient:
                     # Notify the user about insufficiency
+                    res = """I couldn't find sufficient context to fully answer your query based on available documents and web search. "
+                            Please provide a clarified query."""
                     assistant_message = ChatMessage(
                         role=MessageRole.ASSISTANT,
                         content=(
-                            "I couldn't find sufficient context to fully answer your query based on available documents and web search. "
-                            "Please provide a clarified query."
+                            res
                         ),
                     )
+                    
+                    stored_response = res
                     st.session_state.chat_messages.append(assistant_message)
                     with st.chat_message("assistant"):
                         st.markdown(assistant_message.content)
@@ -485,9 +513,13 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                         chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
                         assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
                         st.write(chat_result)
-
+                        for message in chat_result.chat_history:
+                            llm_calls += (message['name'] == 'assistant')
+                            
+                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
+                        stored_response = unified_response
                         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
                         st.session_state.chat_messages.append(assistant_message)
 
@@ -516,9 +548,11 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                         for message in chat_result.chat_history:
                             if message['name'] == "assistant":
                                 assistant_responses.append(message['content'])
-
+                                llm_calls+= 1
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
+                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
+                        stored_response = unified_response
                         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
                         st.markdown(unified_response, unsafe_allow_html=True)
                     except Exception as e:
@@ -538,3 +572,17 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         print("Unsafe query detected:")
         st.error("Unsafe query detected. Please try again.")
     print(st.session_state.chat_messages)
+    
+    output['retrieved_contexts'] = combined_context
+    output['response'] = stored_response
+    output['llm_calls'] = llm_calls
+    output['total_token_cost'] = total_token_cost
+    return output
+# Chat input
+if user_input := st.chat_input("Enter your chat prompt:"):
+    # result = st.session_state.moderator.moderate_chat([{"role": "user", "content": user_input}])
+    # print(result)
+    # result = result.split('\n')[0]
+    
+    output = solve_user_query(user_input)
+    print(output)

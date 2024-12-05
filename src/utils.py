@@ -73,17 +73,22 @@ def classify_query(llm, user_query, query_type):
         prompt = PromptTemplate((query_classification_prompt_no_doc))
         prompt = query_classification_prompt_no_doc.format(user_query=user_query)
 
-    resp = llm.complete(prompt).text
+    result = llm.complete(prompt)
+    cost = result.raw['usage_metadata']['total_token_count']
+    resp = result.text
     resp_li = resp.split('\n')
     resp_li = [x for x in resp_li if x != '']
     query_type = resp_li[0].strip()
     return query_type
 
-def hyde(query, model):
+def hyde(query, model) -> Tuple[str, int]:
     query = "Expand the given query into a document for retrieval. Do not add any numerical information or ask for clarification or make unnecessary changes.\n"+query
     print("start:"+query)
         # print("start:"+query)
-    query_doc = model.complete(query, generation_config={'max_output_tokens':200,"temperature":0.2}).text
+    result = model.complete(query, generation_config={'max_output_tokens':200,"temperature":0.2})
+    query_doc = result.text
+    cost = result.raw['usage_metadata']['total_token_count']
+    
     print("end:"+query_doc)
-    return query_doc+query
+    return query_doc+query, cost
     
