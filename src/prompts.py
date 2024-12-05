@@ -120,6 +120,10 @@ query_classification_prompt = """You are an intelligent AI assistant. You will b
 - **analysis**: The query is asking for a thorough analysis of every part of some document or text, which may require reasoning and understanding of the text.
 - **comparison**: The query is asking for a comparison between two or more entities, which may require multiple sources of information.
 
+**Note:**
+- If you are not confident about the classification, respond with 'other'.
+- Only provide your answer in lowercase. Do not provide any other explanation or response.
+
 ### Examples
 
 **Example 1:**
@@ -150,6 +154,10 @@ query_classification_prompt_no_doc = """You are an intelligent AI assistant. You
 - **summary**: The query is either asking for a summary or it requires a large amount of information to be retrieved and summarized.
 - **search**: The query is asking for a specific information which can be answered with a single piece of information.
 - **comparison**: The query is asking for a comparison between two or more entities, which may require multiple sources of information.
+
+**Note:**
+- If you are not confident about the classification, respond with 'other'.
+- Only provide your answer in lowercase. Do not provide any other explanation or response.
 
 ### Examples
 
