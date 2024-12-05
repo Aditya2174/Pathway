@@ -510,15 +510,11 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                 with st.status("Generating response...", expanded=False) as status2:
                     st.write("Query Type: Direct")
                     try:
-
                         # TODO: Specify the number of chunks based on query_class
                         sec_store_retrieved = st.session_state.sec_store.as_retriever().retrieve(response)
-                        print('=====')
-                        print(sec_store_retrieved)
-                        print('======')
+                    
                         retrieved_text = "\n".join([doc.text for doc in sec_store_retrieved])
 
-                        # print(st.session_state.chat_messages[-1])
                         last_message = st.session_state.chat_messages[-1]
                         last_message.content = f"{last_message}\n\nRetrieved Context:\n{retrieved_text}"
 
@@ -532,7 +528,6 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
 
                         for message in chat_result.chat_history:
                             if message['name'] == "assistant":
-                                llm_calls += 1
                                 resp_len = len(message['content'])
                                 if 'done' not in message['content'].lower() and resp_len > 5:
                                     assistant_responses.append(message['content'])
@@ -574,9 +569,9 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
 
                         elif 'summary' in query_class.lower():
                             # Retrieval of large context & then summarizing using LSA
-                            retriever.similarity_top_k = 50  # Reset retrieval depth
+                            retriever.similarity_top_k = 30  # Reset retrieval depth
                             token_len = get_num_tokens(response)
-                            print(f"no of tokens: {token_len}")
+
                             if(token_len<40):
                                 response, cost = hyde(response, gemini_model)
                             
@@ -592,20 +587,19 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
                             st.write(f"LSA token count: {get_num_tokens(combined_context)}")
                             st.write(combined_context)
-                            sufficient = evaluate_sufficiency(combined_context, response)
+                            sufficient, cost = evaluate_sufficiency(combined_context, response)
                         else:
                             # Initial retrieval of context
                             retriever.similarity_top_k = 5  # Reset retrieval depth
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
-                            if(token_len<40):
+                            if(token_len < 40):
                                 response, cost = hyde(response, gemini_model)
                                 total_token_cost += cost
                             
                             context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
                             sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
                             combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
-                            llm_calls += 1
                             sufficient, cost = evaluate_sufficiency(combined_context, response)
                             
                             if not sufficient:
@@ -613,8 +607,6 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
                                 additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
                                 combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
-                                llm_calls += 1 # add an llm call as not sufficient
-                            
                         
                             tup = sufficient or evaluate_sufficiency(combined_context, response)
                             if not sufficient:
@@ -666,8 +658,8 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
                         assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
                         st.write(chat_result)
-                        for message in chat_result.chat_history:
-                            llm_calls += (message['name'] == 'assistant')
+                        # for message in chat_result.chat_history:
+                        #     llm_calls += (message['name'] == 'assistant')
                             
                         total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         # Combine all assistant responses into one message
@@ -700,4 +692,4 @@ if user_input := st.chat_input("Enter your chat prompt:"):
     # result = result.split('\n')[0]
     
     output = solve_user_query(user_input)
-    print(output)
+    # print(output)
