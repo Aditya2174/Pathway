@@ -114,7 +114,7 @@ User Query: {user_query}
 
 # Classify the user query into one of these categories: code_execution, summary, search, analysis, comparison
 query_classification_prompt = """You are an intelligent AI assistant. You will be provided with a user query. You will have to classify the query into one of the following categories:
-- **code_execution**: The query requires a code to be executed, such as plotting, performing numerical calculations, or verifying the output of a code. Note: If the user only asks to write the code and not execute it, do not classify it as code_execution.
+- **code_execution**: The query specifically requires a code to be **executed**, such as plotting, performing numerical calculations, or verifying the output of a code. **Note:** If the user only asks to write the code and not execute it, do not classify it as code_execution.
 - **summary**: The query is either asking for a summary or it requires a large amount of information to be retrieved and summarized.
 - **search**: The query is asking for a specific information which can be answered with a single piece of information.
 - **analysis**: The query is asking for a thorough analysis of every part of some document or text, which may require reasoning and understanding of the text.
@@ -142,7 +142,7 @@ Answer: analysis
 User Query: What are the differences between the election systems of India and the United States?
 Answer: comparison
 **Example 6:**
-User Query: Write a Python function to calculate the factorial of a number.
+User Query: Write a code to plot a sine wave.
 Answer: search
 
 User Query: {user_query}
@@ -150,7 +150,7 @@ Answer:"""
 
 # Don't classify into analysis if document is not given
 query_classification_prompt_no_doc = """You are an intelligent AI assistant. You will be provided with a user query. You will have to classify the query into one of the following categories:
-- **code_execution**: The query requires a code to be executed, such as plotting, performing numerical calculations, or verifying the output of a code. Note: If the user only asks to write the code and not execute it, do not classify it as code_execution.
+- **code_execution**: The query specifically requires a code to be **executed**, such as plotting, performing numerical calculations, or verifying the output of a code. **Note:** If the user only asks to write the code and not execute it, do not classify it as code_execution.
 - **summary**: The query is either asking for a summary or it requires a large amount of information to be retrieved and summarized.
 - **search**: The query is asking for a specific information which can be answered with a single piece of information.
 - **comparison**: The query is asking for a comparison between two or more entities, which may require multiple sources of information.
@@ -174,7 +174,7 @@ Answer: search
 User Query: What are the differences between the election systems of India and the United States?
 Answer: comparison
 **Example 5:**
-User Query: Write a Python function to calculate the factorial of a number.
+User Query: Write a code to plot a sine wave.
 Answer: search
 
 User Query: {user_query}
@@ -192,7 +192,7 @@ Your task is to:
 5. If the query is vague (e.g., "Tell me about Python syntax"):
    - Provide a summary response based on the entire context.
    - Politely ask the user if they can be more specific about what they are looking for.
-6. If the query involves coding, generate accurate and efficient code solutions and nothing else. Ensure your code is well-commented and tailored to the user's request.
+6. If the query involves coding, generate accurate and efficient code solutions and nothing else. Ensure your code is well-commented and tailored to the user's request. **Note:** if the query requires generating a plot, do not use interactive commands like `plt.show`. Instead, save the plot to the path `plots/image.png` only.
 
 Be clear, accurate, and avoid unnecessary elaboration."""
 
