@@ -14,6 +14,7 @@ import requests
 import pdfplumber
 import pandas as pd
 import tiktoken
+import traceback
 from datetime import datetime
 
 # All LlamaIndex tools needed...LLM, memory, roles, etc
@@ -25,15 +26,15 @@ from utils import (
     get_colored_text,
     get_history_str,
     hyde,
-    get_num_tokens
+    get_num_tokens,
+    classify_query
 )
+from lsa import clustered_rag_lsa
 from prompts import (
     agent_system_prompt,
     user_proxy_prompt
 )
-
-from google_search import web_search_with_logging
-from guardrail import ChatModerator
+# from guardrail import ChatModerator
 from huggingface_hub import login
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
@@ -41,7 +42,7 @@ from llama_index.embeddings.google import GeminiEmbedding
 import torch
 
 # Autogen agents
-from autogen import ConversableAgent, UserProxyAgent, register_function
+from autogen import ConversableAgent, UserProxyAgent
 from autogen.coding import LocalCommandLineCodeExecutor
 
 # Summarizer of history
@@ -50,15 +51,22 @@ from transformers import pipeline
 import requests
 from tavily import TavilyClient
 
+from google_search import web_search_with_logging
+
 # Tavily search tool setup
 tavily_api_key = "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"
+hf_token = "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"
 if not os.environ.get('TAVILY_API_KEY'):
     os.environ['TAVILY_API_KEY'] = tavily_api_key
+
+if not os.environ.get('HF_TOKEN'):
+    os.environ['HF_TOKEN'] = hf_token
 
 tavily = TavilyClient(tavily_api_key)
 
 def search_tool(query: Annotated[str, "The search query"]) -> Annotated[str, "The search results"]:
     return tavily.get_search_context(query=query, search_depth="advanced")
+
 from typing import Tuple
 def evaluate_sufficiency(context_text: str, query: str, total_cost :int) -> Tuple[bool, int]:
         """Use Gemini model to evaluate if the retrieved context suffices to answer the query."""
@@ -69,7 +77,7 @@ def evaluate_sufficiency(context_text: str, query: str, total_cost :int) -> Tupl
             "Respond with 'Yes' or 'No' only."
         )
         time.sleep(1)
-        # result = gemini_model.generate_response(evaluation_prompt)
+
         result = gemini_model.chat([ChatMessage(content=evaluation_prompt, role=MessageRole.USER)])
         cost = result.raw['usage_metadata']['total_token_count']
         if 'no' in result.message.content.lower():
@@ -83,14 +91,18 @@ google_api_key = "AIzaSyAjcXdnMAYrMXLv0cml6MNQF5udbV-F4xo"
 if not os.environ.get('GOOGLE_API_KEY'):
     os.environ['GOOGLE_API_KEY'] = google_api_key
 
+# Initialize the WebSearchAPI
+# GOOGLE_CSE_ID = "AIzaSyBKTZOFWvwR-GMQvSEKthzOpDU86CB8Zoc"
+google_cse_id = "d3a75edbda16e451e"
+
 tool_usage_log = {} # Dictionary to track tool usage
 
-# Constants/Configurations
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 # Number of messages after which chat history is summarized
 SUMMARIZE_AFTER = 10
-SMALL_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024  # 5 MB
+SMALL_FILE_SIZE_THRESHOLD = 1 * 1024 * 1024  # 5 MB
 
 # Pathway server configuration
 PATHWAY_HOST = "127.0.0.1"
@@ -99,6 +111,9 @@ PATHWAY_PORT = 8756
 # Cache directory setup using diskcache
 cache_dir = './document_cache'
 document_cache = dc.Cache(cache_dir)
+
+if "document_cache" not in st.session_state:
+    st.session_state.document_cache = {}  # Initialize with a default value
 
 # Register cleanup function to delete cache on termination
 def cleanup_cache():
@@ -113,7 +128,6 @@ os.makedirs("coding", exist_ok=True)    # Create a working directory for code ex
 gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)  # Initialize a Gemini-1.5-Flash model with LlamaIndex
 
 retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT, similarity_top_k=5)
-
 
 # Initialize session variables
 if 'chat_messages' not in st.session_state:
@@ -138,9 +152,13 @@ if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 if 'tiktoken_tokenizer' not in st.session_state:
     st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
-# if 'moderator' not in st.session_state:
-#     login()  #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 moi tokennn.
-#     st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
+
+# @st.cache_resource
+# def get_moderator():
+#     # login()  #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 moi tokennn.
+#     return ChatModerator(model_id="meta-llama/Llama-Guard-3-8B", device=device)
+
+# st.session_state.moderator = get_moderator()
 
 executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15)
 agent_model_name = "gemini-1.5-flash"
@@ -149,16 +167,11 @@ auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system
                                 llm_config={"config_list": [{"model": agent_model_name, "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
-user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
+user_proxy_code = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
                             default_auto_reply=user_proxy_prompt)
 
-register_function(
-    search_tool,
-    caller=auto_agent,
-    executor=user_proxy,
-    name="search_tool",
-    description="Search the web for the given query",
-)
+user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config=False,
+                            default_auto_reply=user_proxy_prompt)
 
 def summarize_history(messages):
     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
@@ -193,11 +206,57 @@ def extract_non_table_text(page):
 
     return non_table_text.strip()
 
+LARGE_FILE_DIRECTORY = '../data/'
+
 def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold):
     """Reads a file from cache if available, otherwise parses it."""
     file_name = uploaded_file.name
     file_type = uploaded_file.type
 
+    # Check if the file is large and needs to be stored in the large file directory
+    if uploaded_file.size > file_size_threshold:
+        large_file_path = os.path.join(LARGE_FILE_DIRECTORY, file_name)
+        with open(large_file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.warning(f"Large file '{file_name}' saved to directory. Only partial content is being processed.")
+
+        # Process limited content based on file type
+        if file_type == "application/pdf":
+            attached_text = ""
+            with pdfplumber.open(large_file_path) as pdf:
+                for page in pdf.pages[:2]:  # Limit to the first 2 pages
+                    non_table_text = extract_non_table_text(page)
+                    attached_text += non_table_text + "\n"
+
+        elif file_type == "text/plain":
+            with open(large_file_path, "r", encoding="utf-8") as f:
+                attached_text = f.read(1000)  # Limit to the first 1000 characters
+
+        elif file_type == "application/json":
+            with open(large_file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            attached_text = json.dumps(data, indent=2)[:1000]  # Limit JSON preview to 1000 characters
+
+        elif file_type == "text/csv":
+            df = pd.read_csv(large_file_path)
+            preview = df.head()
+            attached_text = f"""
+            File Size: {uploaded_file.size / (1024 * 1024):.2f} MB
+            Number of Rows: {df.shape[0]}
+            Number of Columns: {df.shape[1]}
+            Columns: {', '.join(df.columns)}
+            Preview: {preview.to_string()}
+            """
+            st.write("Preview of Data:")
+            st.dataframe(df.head(10))
+        else:
+            attached_text = f"File type '{file_type}' not supported for partial processing."
+
+        # Add the limited content to the cache
+        cache[file_name] = attached_text
+        return attached_text
+
+    # If the file is not large, process normally
     if file_name in cache:
         st.success(f"Loaded cached document: {file_name}")
         return cache[file_name]
@@ -278,6 +337,94 @@ with st.sidebar:
 
                 st.success(f"Document '{file_name}' added to the secondary vector store!")
 
+# def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold):
+#     """Reads a file from cache if available, otherwise parses it."""
+#     file_name = uploaded_file.name
+#     file_type = uploaded_file.type
+
+#     if uploaded_file.size > file_size_threshold:
+#         os.
+
+#     if file_name in cache:
+#         st.success(f"Loaded cached document: {file_name}")
+#         return cache[file_name]
+
+#     attached_text = ""
+
+#     if file_type == "application/pdf":
+#         with pdfplumber.open(uploaded_file) as pdf:
+#             for page in pdf.pages:
+#                 non_table_text = extract_non_table_text(page)
+#                 attached_text += non_table_text + "\n"
+
+#                 # Extract tables
+#                 tables = page.extract_tables()
+#                 if tables:
+#                     attached_text += "\n--- Table Data ---\n"
+#                     for table in tables:
+#                         for row in table:
+#                             attached_text += " | ".join(cell if cell else "" for cell in row) + "\n"
+#                     attached_text += "--- End of Table ---\n"
+
+#     elif file_type == "text/plain":
+#         attached_text = uploaded_file.read().decode("utf-8")
+
+#     elif file_type == "application/json":
+#         attached_text = json.dumps(json.load(uploaded_file), indent=2)
+
+#     elif file_type == "text/csv":
+#         if uploaded_file.size <= file_size_threshold:
+#             df = pd.read_csv(uploaded_file)
+#             attached_text = df.to_string(index=False)
+#         else:
+#             df = pd.read_csv(uploaded_file)
+#             summary_info = f"""
+#             File Size: {uploaded_file.size / (1024 * 1024):.2f} MB
+#             Number of Rows: {df.shape[0]}
+#             Number of Columns: {df.shape[1]}
+#             Columns: {', '.join(df.columns)}
+#             """
+#             attached_text = summary_info
+#             st.write("Preview of Data:")
+#             st.dataframe(df.head(10))
+
+#     cache[file_name] = attached_text
+#     return attached_text
+
+# combined_attached_text = ""
+# # Document uploader for including document text in the chat prompt
+# with st.sidebar:
+#     st.subheader("Upload Documents")
+#     uploaded_files = st.file_uploader(
+#         "Upload one or more documents (.txt, .json, .csv, .pdf)", 
+#         type=["txt", "json", "pdf", "csv"], 
+#         accept_multiple_files=True
+#     )
+#     combined_attached_text = ""
+
+#     if uploaded_files:
+#         for uploaded_file in uploaded_files:
+#             file_name = uploaded_file.name
+
+#             if file_name in st.session_state.uploaded_filenames:
+#                 st.warning(f"'{file_name}' has already been added to the vector store.")
+#                 combined_attached_text += document_cache[file_name] + "\n"
+#             else:
+#                 attached_text = read_file_from_cache_or_parse(
+#                     uploaded_file,
+#                     document_cache,
+#                     SMALL_FILE_SIZE_THRESHOLD
+#                 )
+#                 combined_attached_text += attached_text + "\n"
+
+#                 # Add the parsed text as a Document for the vector store
+#                 doc = Document(text=attached_text, metadata={"filename": file_name})
+#                 st.session_state.uploaded_docs.append(doc)
+#                 st.session_state.sec_store.insert(doc)
+#                 st.session_state.uploaded_filenames.add(file_name)
+
+#                 st.success(f"Document '{file_name}' added to the secondary vector store!")
+
 # Initialize state variables
 if "displayed_message_contents" not in st.session_state:
     st.session_state.displayed_message_contents = set()
@@ -303,6 +450,9 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
     combined_context = ""
     llm_calls = 1
     total_token_cost = 0
+    assistant_message = None
+    stored_response = None
+    unified_response = None
     if result == 'safe':
         st.session_state.message_counter += 1
         st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
@@ -330,15 +480,17 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
             total_token_cost += cost
             st.write(f"Query Type: {query_type}")
             st.write(f"Reformed query: {response}")
+            st.write(f"Token cost: {cost}")
         status1.update(label=f'Query Type: {query_type}', expanded=False, state='complete')
 
         # Handle responses based on query type
-        if query_type == "general":
+        if "general" in query_type.lower():
             assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=response)
             stored_response = response
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
             st.session_state.chat_messages.append(assistant_message)
             st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=user_input))
+            st.session_state.chat_messages_display.append(assistant_message)
             with st.chat_message("assistant"):
                 st.markdown(response)
         else:
@@ -347,108 +499,153 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
             display_msg = user_input + "<br>" + green_txt_reform
             st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=display_msg))
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=response))
-            if query_type == 'direct':
-                print("Query Type: Direct")
-                if combined_attached_text:
-                    # Modify the last message in the session state to include document context
-                    last_message = st.session_state.chat_messages[-1]
-                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{combined_attached_text}"
 
-                formatted_messages = [
-                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                    for msg in st.session_state.chat_messages
-                ]
-                response_with_h = get_history_str(st.session_state.chat_messages)
-                combined_attached_text = combined_attached_text if combined_attached_text else ""
+            with st.status(label="Classifying user query...", expanded=False) as status5:
+                query_class = classify_query(gemini_model, user_input, query_type)
+                st.write("Query Classification:", query_class)
+            status5.update(label=f'Query class: {query_class}')
+
+            if 'direct' in query_type.lower():
+                print("Query Type: Direct")
                 with st.status("Generating response...", expanded=False) as status2:
                     st.write("Query Type: Direct")
                     try:
-                        
-                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
+
+                        # TODO: Specify the number of chunks based on query_class
+                        sec_store_retrieved = st.session_state.sec_store.as_retriever().retrieve(response)
+                        print('=====')
+                        print(sec_store_retrieved)
+                        print('======')
+                        retrieved_text = "\n".join([doc.text for doc in sec_store_retrieved])
+
+                        # print(st.session_state.chat_messages[-1])
+                        last_message = st.session_state.chat_messages[-1]
+                        last_message.content = f"{last_message}\n\nRetrieved Context:\n{retrieved_text}"
+
+                        response_with_h = get_history_str(st.session_state.chat_messages)
+
+                        if 'code_execution' in query_class.lower(): 
+                            chat_result = user_proxy_code.initiate_chat(recipient=auto_agent, message=response_with_h)
+                        else:
+                            chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
                         assistant_responses = []
 
                         for message in chat_result.chat_history:
                             if message['name'] == "assistant":
                                 llm_calls += 1
-                                assistant_responses.append(message['content'])
+                                resp_len = len(message['content'])
+                                if 'done' not in message['content'].lower() and resp_len > 5:
+                                    assistant_responses.append(message['content'])
 
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
-                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
+                        total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         stored_response = unified_response
                         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
                         st.markdown(unified_response, unsafe_allow_html=True)
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
 
-                    # print(f"Chat Result:\n{chat_result['chat_history'][-1]['content']}")
                 with st.chat_message("assistant"):
                     st.markdown(unified_response, unsafe_allow_html=True)
                 st.session_state.chat_messages.append(assistant_message)
                 st.session_state.chat_messages_display.append(assistant_message)
                 status2.update(label="Generation Complete!", expanded=False)
 
-            elif query_type == "context":
+            elif "context" in query_type.lower():
                 print("Query Type: Context")
                 sufficient = None
                 with st.status("Retrieving data...", expanded=False) as status3:
                     try:
-                        # Initial retrieval of context
-                        retriever.similarity_top_k = 5  # Reset retrieval depth
-                        token_len = get_num_tokens(response)
-                        print(f"no of tokens: {token_len}")
-                        if(token_len<40):
-                            response, cost = hyde(response, gemini_model)
-                            total_token_cost += cost
-                        print(response)
-                        context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
-                        sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
-                        combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
-                        llm_calls += 1
-                        sufficient, cost = evaluate_sufficiency(combined_context, response)
-                        
-                        if not sufficient:
-                            retriever.similarity_top_k += 5  # Increase retrieval depth
-                            additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
-                            additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
-                            combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
-                            llm_calls += 1 # add an llm call as not sufficient
-                        
-                        
-                        tup = sufficient or evaluate_sufficiency(combined_context, response)
-                        if not sufficient:
-                            sufficient = tup[0]
-                            cost = tup[1]
-                            total_token_cost += cost
+                        if 'code_execution' in query_class.lower():
+                            retriever.similarity_top_k = 5
+                            token_len = get_num_tokens(response)
+                            print(f"no of tokens: {token_len}")
+                            if(token_len<40):
+                                response, cost = hyde(response, gemini_model)
+                                total_token_cost += cost
                             
-                        if not sufficient:
-                            # Use web search tool if still insufficient
-                            # search_results = web_search_with_logging(response)
-                            search_results = search_tool(response)
-                            combined_context += f"\n\nWeb Search Results:\n{search_results}"
-                            print(f"Search result: {search_results}")
+                            primary_context = retriever.retrieve(response)
+                            context_text = "\n".join([doc.text for doc in primary_context])
+                            sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                            combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+                            
+                            sufficient = True
+
+                        elif 'summary' in query_class.lower():
+                            # Retrieval of large context & then summarizing using LSA
+                            retriever.similarity_top_k = 50  # Reset retrieval depth
+                            token_len = get_num_tokens(response)
+                            print(f"no of tokens: {token_len}")
+                            if(token_len<40):
+                                response, cost = hyde(response, gemini_model)
+                            
+                            primary_store_retrieved = retriever.retrieve(response)
+                            st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in primary_store_retrieved])}")
+                            context_summaries = clustered_rag_lsa([doc.text for doc in primary_store_retrieved], num_clusters=20, sentences_count=3)
+                            context_text = "\n".join(context_summaries)
+                            sec_store_retrieved = st.session_state.sec_store.as_retriever().retrieve(response)
+                            st.write(f"Retrieved Document context size: {sum([get_num_tokens(doc.text) for doc in sec_store_retrieved])}")
+                            document_context = [doc.text for doc in sec_store_retrieved]
+                            sec_context_summaries = clustered_rag_lsa(document_context, num_clusters=int(len(document_context)*0.5), sentences_count=5)
+                            sec_context_text = "\n".join(sec_context_summaries)
+                            combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+                            st.write(f"LSA token count: {get_num_tokens(combined_context)}")
+                            st.write(combined_context)
+                            sufficient = evaluate_sufficiency(combined_context, response)
+                        else:
+                            # Initial retrieval of context
+                            retriever.similarity_top_k = 5  # Reset retrieval depth
+                            token_len = get_num_tokens(response)
+                            print(f"no of tokens: {token_len}")
+                            if(token_len<40):
+                                response, cost = hyde(response, gemini_model)
+                                total_token_cost += cost
+                            
+                            context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                            sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                            combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
                             llm_calls += 1
+                            sufficient, cost = evaluate_sufficiency(combined_context, response)
                             
-                        tup = sufficient or evaluate_sufficiency(combined_context, response)
-                        if not sufficient:
-                            sufficient = tup[0]
-                            cost = tup[1]
-                            total_token_cost += cost
+                            if not sufficient:
+                                retriever.similarity_top_k += 5  # Increase retrieval depth
+                                additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
+                                additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                                combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
+                                llm_calls += 1 # add an llm call as not sufficient
+                            
+                        
+                            tup = sufficient or evaluate_sufficiency(combined_context, response)
+                            if not sufficient:
+                                sufficient = tup[0]
+                                cost = tup[1]
+                                total_token_cost += cost
+                            
+                            if not sufficient:
+                                # Use web search tool if still insufficient
+                                search_results = web_search_with_logging(response)
+                                # search_results = search_tool(response)
+                                combined_context += f"\n\nWeb Search Results:\n{search_results}"
+                                print(f"Search result: {search_results}")
+                                llm_calls += 1
+                            
+                            tup = sufficient or evaluate_sufficiency(combined_context, response)
+                            if not sufficient:
+                                sufficient = tup[0]
+                                cost = tup[1]
+                                total_token_cost += cost
                         st.write(combined_context)
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
+                        traceback.print_exc()
                 status3.update(label="Retrieval Complete!" if sufficient else "Not enough contex 🙁", expanded=False)
 
                 if not sufficient:
                     # Notify the user about insufficiency
                     res = """I couldn't find sufficient context to fully answer your query based on available documents and web search. "
                             Please provide a clarified query."""
-                    assistant_message = ChatMessage(
-                        role=MessageRole.ASSISTANT,
-                        content=(
-                            res
-                        ),
-                    )
+                    assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=res)
                     
                     stored_response = res
                     st.session_state.chat_messages.append(assistant_message)
@@ -463,13 +660,16 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                     response_with_h = get_history_str(st.session_state.chat_messages) + f"\nContext:\n{combined_context}"
 
                     with st.status("Generating response...", expanded=False) as status2:
-                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
+                        if 'code_execution' in query_class.lower():
+                            chat_result = user_proxy_code.initiate_chat(recipient=auto_agent, message=response_with_h)
+                        else:
+                            chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
                         assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
                         st.write(chat_result)
                         for message in chat_result.chat_history:
                             llm_calls += (message['name'] == 'assistant')
                             
-                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
+                        total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
                         stored_response = unified_response
@@ -479,44 +679,6 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                     with st.chat_message("assistant"):
                         st.markdown(unified_response, unsafe_allow_html=True)
                     status2.update(label="Generation Complete!", expanded=False)
-            elif query_type == 'code_execution':
-                print("Query Type: Code Execution")
-                if combined_attached_text:
-                    # Modify the last message in the session state to include document context
-                    last_message = st.session_state.chat_messages[-1]
-                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{combined_attached_text}"
-
-                formatted_messages = [
-                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                    for msg in st.session_state.chat_messages
-                ]
-                response_with_h = get_history_str(st.session_state.chat_messages)
-                combined_attached_text = combined_attached_text if combined_attached_text else ""
-                with st.status("Generating response...", expanded=False) as status2:
-                    st.write("Query Type: Direct")
-                    try:
-                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
-                        assistant_responses = []
-
-                        for message in chat_result.chat_history:
-                            if message['name'] == "assistant":
-                                assistant_responses.append(message['content'])
-                                llm_calls+= 1
-                        # Combine all assistant responses into one message
-                        unified_response = "\n\n".join(assistant_responses)
-                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
-                        stored_response = unified_response
-                        assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
-                        st.markdown(unified_response, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"An error occurred: {e}")
-
-                
-                with st.chat_message("assistant"):
-                    st.markdown(unified_response, unsafe_allow_html=True)
-                st.session_state.chat_messages.append(assistant_message)
-                st.session_state.chat_messages_display.append(assistant_message)
-                status2.update(label="Generation Complete!", expanded=False)
 
             else:
                 print("Invalid response type detected:", query_type)
