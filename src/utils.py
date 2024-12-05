@@ -5,21 +5,21 @@ from prompts import (
     reformulation_type_prompt,
     reformulation_type_prompt_no_doc,
     query_classification_prompt,
-    query_classification_prompt_no_doc
+    query_classification_prompt_no_doc,
+    hyde_prompt
 )
 from llama_index.llms.gemini import Gemini
-import tiktoken
 import pdfplumber
 import json
 import os
 import pandas as pd
 import streamlit as st
-import google.generativeai as genai
 from typing import Tuple
 import time
-if 'tiktoken_tokenizer' not in st.session_state:
-    st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
 from prompts import reformulation_type_prompt
+from vertexai.preview import tokenization
+model_name = "gemini-1.5-flash"
+tokenizer = tokenization.get_tokenizer_for_model(model_name)
 
 def get_history_str(chat_history):
     chat_history_li = []
@@ -85,7 +85,7 @@ def get_colored_text(text, color = 'green'):
     return txt
 
 def get_num_tokens(txt):
-    num_tokens = len(st.session_state.tiktoken_tokenizer.encode(txt))
+    num_tokens = tokenizer.count_tokens(txt).total_tokens
     return num_tokens
 
 def classify_query(llm, user_query, query_type):
@@ -107,12 +107,13 @@ def classify_query(llm, user_query, query_type):
     return query_type
 
 def hyde(input_query, model) -> Tuple[str, int]:
-    query = "Expand the given query into a document for retrieval. Do not add any numerical information or ask for clarification or make unnecessary changes.\n"+input_query
-    result = model.complete(query, generation_config={'max_output_tokens':200,"temperature":0.2})
-    query_doc = result.text
+    prompt = PromptTemplate((hyde_prompt))
+    prompt = prompt.format(input_query=input_query)
+    result = model.complete(prompt, generation_config={'max_output_tokens':300,"temperature":0.2})
+    query_doc = result.text.replace('#','')
     cost = result.raw['usage_metadata']['total_token_count']
     
-    return f"{input_query}\n {query_doc}", cost
+    return f"{input_query}  {query_doc}", cost
     
 def is_plot_in_response(response):
     if ('plots/image_' in response) and ('.png' in response):

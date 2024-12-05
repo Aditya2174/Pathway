@@ -608,7 +608,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
                                 combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
                         
-                            tup = sufficient or evaluate_sufficiency(combined_context, response)
+                            tup = sufficient or evaluate_sufficiency(combined_context, response, total_token_cost)
                             if not sufficient:
                                 sufficient = tup[0]
                                 cost = tup[1]
@@ -622,7 +622,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 print(f"Search result: {search_results}")
                                 llm_calls += 1
                             
-                            tup = sufficient or evaluate_sufficiency(combined_context, response)
+                            tup = sufficient or evaluate_sufficiency(combined_context, response, total_token_cost)
                             if not sufficient:
                                 sufficient = tup[0]
                                 cost = tup[1]
@@ -678,7 +678,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
     else:
         print("Unsafe query detected:")
         st.error("Unsafe query detected. Please try again.")
-    print(st.session_state.chat_messages)
+    # print(st.session_state.chat_messages)
     
     output['retrieved_contexts'] = combined_context
     output['response'] = stored_response

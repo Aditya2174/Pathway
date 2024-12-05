@@ -39,6 +39,7 @@ from prompts import (
     user_proxy_prompt
 )
 # from guardrail import ChatModerator
+# from guardrail import ChatModerator
 from huggingface_hub import login
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
@@ -84,7 +85,8 @@ google_cse_id = "d3a75edbda16e451e"
 tool_usage_log = {} # Dictionary to track tool usage
 
 # Constants/Configurations
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 # Number of messages after which chat history is summarized
 SUMMARIZE_AFTER = 10
@@ -231,6 +233,9 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
     assistant_message = None
     stored_response = None
     unified_response = None
+    assistant_message = None
+    stored_response = None
+    unified_response = None
     if result == 'safe':
         st.session_state.message_counter += 1
         st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
@@ -262,11 +267,13 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
 
         # Handle responses based on query type
         if "general" in query_type.lower():
+        if "general" in query_type.lower():
             assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=response)
             stored_response = response
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
             st.session_state.chat_messages.append(assistant_message)
             st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=user_input))
+            st.session_state.chat_messages_display.append(assistant_message)
             st.session_state.chat_messages_display.append(assistant_message)
             with st.chat_message("assistant"):
                 st.markdown(response)
@@ -282,6 +289,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                 st.write("Query Classification:", query_class)
             status5.update(label=f'Query class: {query_class}')
 
+            if 'direct' in query_type.lower():
             if 'direct' in query_type.lower():
                 print("Query Type: Direct")
                 with st.status("Generating response...", expanded=False) as status2:
@@ -306,9 +314,13 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 resp_len = len(message['content'])
                                 if 'done' not in message['content'].lower() and resp_len > 5:
                                     assistant_responses.append(message['content'])
+                                resp_len = len(message['content'])
+                                if 'done' not in message['content'].lower() and resp_len > 5:
+                                    assistant_responses.append(message['content'])
 
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
+                        total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         stored_response = unified_response
                         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
@@ -322,6 +334,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                 st.session_state.chat_messages_display.append(assistant_message)
                 status2.update(label="Generation Complete!", expanded=False)
 
+            elif "context" in query_type.lower():
             elif "context" in query_type.lower():
                 print("Query Type: Context")
                 sufficient = None
@@ -349,6 +362,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
                             if(token_len<40):
+                                response, cost = hyde(response, gemini_model)
                                 response, cost = hyde(response, gemini_model)
                             print(response)
 
@@ -458,6 +472,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             llm_calls += (message['name'] == 'assistant')
                             
                         total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
+                        total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
                         stored_response = unified_response
@@ -466,6 +481,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
 
                     with st.chat_message("assistant"):
                         st.markdown(unified_response, unsafe_allow_html=True)
+                    status2.update(label="Generation Complete!", expanded=False)
                     status2.update(label="Generation Complete!", expanded=False)
 
             else:

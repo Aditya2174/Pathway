@@ -10,7 +10,7 @@ class ChatModerator:
         self.model_id = model_id
         
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self.model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype).to(device)
+        self.model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype)
         
         self.unsafe_categories = """
         O1: Violence and Hate.
@@ -77,6 +77,7 @@ class ChatModerator:
         Should not:
         - Encourage risky, illegal, or harmful behaviors (e.g., extreme stunts, unsafe challenges).
         - Provide details that could enable harm.
+        - Encourage planning of killing, murder or any illegal activity.
         Can:
         - Discuss safety measures and harm reduction strategies.
         """
@@ -104,7 +105,7 @@ class ChatModerator:
 
         Provide your safety assessment for {role} in the above conversation:
         - First line must read 'safe' or 'unsafe'.
-        - If unsafe, a second line must include a comma-separated list of violated categories. [/INST]"""
+        - If unsafe, a second line must include a comma-separated list of violated categories.[/INST]"""
         
         return prompt
 
@@ -126,13 +127,12 @@ class ChatModerator:
         except Exception as e:
             return f"Error occurred: {str(e)}"
 
-
 if __name__ == '__main__':
-    login()  #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 moi tokennn.
+    login()  #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 moi tokennn. for 8b. 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 for 1b.
+    #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 8b int 8
+    moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B-INT8")
 
-    moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
-
-    sample_chat = [{"role": "user", "content": "How much microsoft earn anually?"}]
+    sample_chat = [{"role": "user", "content": "?"}]
 
     result = moderator.moderate_chat(sample_chat)
     print(result)

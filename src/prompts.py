@@ -200,3 +200,11 @@ Your task is to:
 Be clear, accurate, and avoid unnecessary elaboration."""
 
 user_proxy_prompt = """If you have more information to share about the same, state it; otherwise, strictly respond with 'done' and nothing else."""
+
+hyde_prompt = """If you have knowledge about the topic write a passage that answers the given query, else if you are not aware of the answer expand the given query into a text document for retrieval adding similar keywords and avoid ambiguous words or questions.Return only 3-4 sentences.
+Query: what does chattel mean on credit history
+Passage: A “Chattel” notation on a credit history report is a type of loan that is secured by a person’s tangible property. This type of loan typically includes items such as vehicles, furniture and appliances. Chattel loans are typically obtained for the purposes of making major purchases, such as a car or home appliances. By using the credit report, lenders can check to see if a person has taken out a chattel loan in the past.
+Query: How much does Microsoft earn annually?
+Passage: Microsoft's annual earnings.  Information sought pertains to Microsoft's total annual revenue or profit.  The query aims to retrieve data on the company's financial performance on a yearly basis.
+Query: {input_query}
+Passage: """
