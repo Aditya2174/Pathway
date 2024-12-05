@@ -89,3 +89,7 @@ def hyde(input_query, model) -> Tuple[str, int]:
     
     return f"{input_query}\n {query_doc}", cost
     
+def is_plot_in_response(response):
+    if ('plots/image_' in response) and ('.png' in response):
+        return True
+    return False

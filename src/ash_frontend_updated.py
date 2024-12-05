@@ -26,15 +26,16 @@ from utils import (
     get_colored_text,
     get_history_str,
     hyde,
-    get_num_tokens, 
-    classify_query
+    get_num_tokens,
+    classify_query,
+    is_plot_in_response
 )
 from lsa import clustered_rag_lsa
 from prompts import (
     agent_system_prompt,
     user_proxy_prompt
 )
-from guardrail import ChatModerator
+# from guardrail import ChatModerator
 from huggingface_hub import login
 from llama_index.core.indices import VectorStoreIndex
 from llama_index.core import Document
@@ -204,27 +205,36 @@ if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 if 'tiktoken_tokenizer' not in st.session_state:
     st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
-if 'moderator' not in st.session_state:
-    # login()  #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 moi tokennn.
-    st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
+if 'plot_count' not in st.session_state:
+    st.session_state.plot_count = 1
+
+# @st.cache_resource
+# def get_moderator():
+#     # login()  #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 moi tokennn.
+#     return ChatModerator(model_id="meta-llama/Llama-Guard-3-8B", device=device)
+
+# st.session_state.moderator = get_moderator()
 
 executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15)
 agent_model_name = "gemini-1.5-flash"
 
-auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt.format(current_date = datetime.now().strftime("%Y-%m-%d")),
+auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt.format(current_date = datetime.now().strftime("%Y-%m-%d"), plot_count=st.session_state.plot_count),
                                 llm_config={"config_list": [{"model": agent_model_name, "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
-user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
+user_proxy_code = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
                             default_auto_reply=user_proxy_prompt)
 
-register_function(
-    search_tool,
-    caller=auto_agent,
-    executor=user_proxy,
-    name="search_tool",
-    description="Search the web for the given query",
-)
+user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config=False,
+                            default_auto_reply=user_proxy_prompt)
+
+# register_function(
+#     search_tool,
+#     caller=auto_agent,
+#     executor=user_proxy,
+#     name="search_tool",
+#     description="Search the web for the given query",
+# )
 
 def summarize_history(messages):
     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
@@ -360,6 +370,9 @@ for chat in st.session_state.chat_messages_display:
     role = "assistant" if chat.role == MessageRole.ASSISTANT else "user"
     with st.chat_message(role):
         st.markdown(chat.content, unsafe_allow_html=True)
+        if is_plot_in_response(chat.content):
+            image_idx = chat.content.split('plots/image_')[1].split('.png')[0]
+            st.image(f'coding/plots/image_{image_idx}.png')
 
 from typing import Dict
 def solve_user_query(user_input:str) -> Dict[str, str]:
@@ -369,6 +382,9 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
     combined_context = ""
     llm_calls = 1
     total_token_cost = 0
+    assistant_message = None
+    stored_response = None
+    unified_response = None
     if result == 'safe':
         st.session_state.message_counter += 1
         st.session_state.displayed_message_contents.clear()  # Clear previously displayed contents
@@ -400,12 +416,13 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
         status1.update(label=f'Query Type: {query_type}', expanded=False, state='complete')
 
         # Handle responses based on query type
-        if query_type == "general":
+        if "general" in query_type.lower():
             assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=response)
             stored_response = response
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
             st.session_state.chat_messages.append(assistant_message)
             st.session_state.chat_messages_display.append(ChatMessage(role=MessageRole.USER, content=user_input))
+            st.session_state.chat_messages_display.append(assistant_message)
             with st.chat_message("assistant"):
                 st.markdown(response)
         else:
@@ -420,72 +437,92 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                 st.write("Query Classification:", query_class)
             status5.update(label=f'Query class: {query_class}')
 
-            if query_type == 'direct':
+            if 'direct' in query_type.lower():
                 print("Query Type: Direct")
-                if combined_attached_text:
-                    # Modify the last message in the session state to include document context
-                    last_message = st.session_state.chat_messages[-1]
-                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{combined_attached_text}"
-
-                formatted_messages = [
-                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                    for msg in st.session_state.chat_messages
-                ]
-                response_with_h = get_history_str(st.session_state.chat_messages)
-                combined_attached_text = combined_attached_text if combined_attached_text else ""
                 with st.status("Generating response...", expanded=False) as status2:
                     st.write("Query Type: Direct")
                     try:
-                        
-                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
+
+                        # TODO: Specify the number of chunks based on query_class
+                        sec_store_retrieved = st.session_state.sec_store.as_retriever().retrieve(response)
+                        retrieved_text = "\n".join([doc.text for doc in sec_store_retrieved])
+
+                        # print(st.session_state.chat_messages[-1])
+                        last_message = st.session_state.chat_messages[-1]
+                        last_message.content = f"{last_message}\n\nRetrieved Context:\n{retrieved_text}"
+
+                        response_with_h = get_history_str(st.session_state.chat_messages)
+
+                        if 'code_execution' in query_class.lower(): 
+                            chat_result = user_proxy_code.initiate_chat(recipient=auto_agent, message=response_with_h)
+                        else:
+                            chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
                         assistant_responses = []
 
                         for message in chat_result.chat_history:
                             if message['name'] == "assistant":
                                 llm_calls += 1
-                                assistant_responses.append(message['content'])
+                                resp_len = len(message['content'])
+                                if 'done' not in message['content'].lower() and resp_len > 5:
+                                    assistant_responses.append(message['content'])
 
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
-                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
+                        total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         stored_response = unified_response
                         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
                         st.markdown(unified_response, unsafe_allow_html=True)
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
 
-                    # print(f"Chat Result:\n{chat_result['chat_history'][-1]['content']}")
                 with st.chat_message("assistant"):
                     st.markdown(unified_response, unsafe_allow_html=True)
                 st.session_state.chat_messages.append(assistant_message)
                 st.session_state.chat_messages_display.append(assistant_message)
                 status2.update(label="Generation Complete!", expanded=False)
 
-            elif query_type == "context":
+            elif "context" in query_type.lower():
                 print("Query Type: Context")
                 sufficient = None
                 with st.status("Retrieving data...", expanded=False) as status3:
                     try:
-                        if query_class in 'summary' :
+                        if 'code_execution' in query_class.lower():
+                            retriever.similarity_top_k = 5
+                            token_len = get_num_tokens(response)
+                            print(f"no of tokens: {token_len}")
+                            if(token_len<40):
+                                response, cost = hyde(response, gemini_model)
+                                total_token_cost += cost
+                            print(response)
+                            primary_context = retriever.retrieve(response)
+                            context_text = "\n".join([doc.text for doc in primary_context])
+                            sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
+                            combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
+                            
+                            sufficient = True
+
+                        elif 'summary' in query_class.lower():
                             # Retrieval of large context & then summarizing using LSA
                             retriever.similarity_top_k = 50  # Reset retrieval depth
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
                             if(token_len<40):
-                                response = hyde(response, gemini_model)
+                                response, cost = hyde(response, gemini_model)
                             print(response)
-                            st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in retriever.retrieve(response)])}")
-                            context_summaries = clustered_rag_lsa([doc.text for doc in retriever.retrieve(response)], num_clusters=20, sentences_count=3)
+                            primary_store_retrieved = retriever.retrieve(response)
+                            st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in primary_store_retrieved])}")
+                            context_summaries = clustered_rag_lsa([doc.text for doc in primary_store_retrieved], num_clusters=20, sentences_count=3)
                             context_text = "\n".join(context_summaries)
-                            st.write(f"Retrieved Document context size: {sum([get_num_tokens(doc.text) for doc in st.session_state.sec_store.as_retriever().retrieve(response)])}")
-                            document_context = [doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)]
+                            sec_store_retrieved = st.session_state.sec_store.as_retriever().retrieve(response)
+                            st.write(f"Retrieved Document context size: {sum([get_num_tokens(doc.text) for doc in sec_store_retrieved])}")
+                            document_context = [doc.text for doc in sec_store_retrieved]
                             sec_context_summaries = clustered_rag_lsa(document_context, num_clusters=int(len(document_context)*0.5), sentences_count=5)
                             sec_context_text = "\n".join(sec_context_summaries)
                             combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
                             st.write(f"LSA token count: {get_num_tokens(combined_context)}")
                             st.write(combined_context)
-                            sufficient = evaluate_sufficiency(combined_context, response)
-                        else :
+                            sufficient, cost = evaluate_sufficiency(combined_context, response, total_token_cost)
+                        else:
                             # Initial retrieval of context
                             retriever.similarity_top_k = 5  # Reset retrieval depth
                             token_len = get_num_tokens(response)
@@ -498,7 +535,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
                             combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
                             llm_calls += 1
-                            sufficient, cost = evaluate_sufficiency(combined_context, response)
+                            sufficient, cost = evaluate_sufficiency(combined_context, response, total_token_cost)
                             
                             if not sufficient:
                                 retriever.similarity_top_k += 5  # Increase retrieval depth
@@ -508,7 +545,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 llm_calls += 1 # add an llm call as not sufficient
                             
                         
-                            tup = sufficient or evaluate_sufficiency(combined_context, response)
+                            tup = sufficient or evaluate_sufficiency(combined_context, response, total_token_cost)
                             if not sufficient:
                                 sufficient = tup[0]
                                 cost = tup[1]
@@ -522,7 +559,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 print(f"Search result: {search_results}")
                                 llm_calls += 1
                             
-                            tup = sufficient or evaluate_sufficiency(combined_context, response)
+                            tup = sufficient or evaluate_sufficiency(combined_context, response, total_token_cost)
                             if not sufficient:
                                 sufficient = tup[0]
                                 cost = tup[1]
@@ -557,13 +594,16 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                     response_with_h = get_history_str(st.session_state.chat_messages) + f"\nContext:\n{combined_context}"
 
                     with st.status("Generating response...", expanded=False) as status2:
-                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
+                        if 'code_execution' in query_class.lower():
+                            chat_result = user_proxy_code.initiate_chat(recipient=auto_agent, message=response_with_h)
+                        else:
+                            chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h)
                         assistant_responses = [message['content'] for message in chat_result.chat_history if message['name'] == "assistant"]
                         st.write(chat_result)
                         for message in chat_result.chat_history:
                             llm_calls += (message['name'] == 'assistant')
                             
-                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
+                        total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                         # Combine all assistant responses into one message
                         unified_response = "\n\n".join(assistant_responses)
                         stored_response = unified_response
@@ -573,44 +613,6 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                     with st.chat_message("assistant"):
                         st.markdown(unified_response, unsafe_allow_html=True)
                     status2.update(label="Generation Complete!", expanded=False)
-            elif query_type == 'code_execution':
-                print("Query Type: Code Execution")
-                if combined_attached_text:
-                    # Modify the last message in the session state to include document context
-                    last_message = st.session_state.chat_messages[-1]
-                    last_message.content = f"{last_message.content}\n\nAttached Document Context:\n{combined_attached_text}"
-
-                formatted_messages = [
-                    {"role": "user" if msg.role == MessageRole.USER else "assistant", "content": msg.content}
-                    for msg in st.session_state.chat_messages
-                ]
-                response_with_h = get_history_str(st.session_state.chat_messages)
-                combined_attached_text = combined_attached_text if combined_attached_text else ""
-                with st.status("Generating response...", expanded=False) as status2:
-                    st.write("Query Type: Direct")
-                    try:
-                        chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=response_with_h + "\nAttached document's content:\n" + combined_attached_text)
-                        assistant_responses = []
-
-                        for message in chat_result.chat_history:
-                            if message['name'] == "assistant":
-                                assistant_responses.append(message['content'])
-                                llm_calls+= 1
-                        # Combine all assistant responses into one message
-                        unified_response = "\n\n".join(assistant_responses)
-                        total_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
-                        stored_response = unified_response
-                        assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
-                        st.markdown(unified_response, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"An error occurred: {e}")
-
-                
-                with st.chat_message("assistant"):
-                    st.markdown(unified_response, unsafe_allow_html=True)
-                st.session_state.chat_messages.append(assistant_message)
-                st.session_state.chat_messages_display.append(assistant_message)
-                status2.update(label="Generation Complete!", expanded=False)
 
             else:
                 print("Invalid response type detected:", query_type)
@@ -630,6 +632,11 @@ if user_input := st.chat_input("Enter your chat prompt:"):
     # result = st.session_state.moderator.moderate_chat([{"role": "user", "content": user_input}])
     # print(result)
     # result = result.split('\n')[0]
-    
+
+
     output = solve_user_query(user_input)
     print(output)
+
+    if is_plot_in_response(output['response']):
+        st.image(f'coding/plots/image_{st.session_state.plot_count}.png')
+        st.session_state.plot_count += 1
