@@ -14,12 +14,23 @@ import requests
 import pdfplumber
 import pandas as pd
 import tiktoken
+from datetime import datetime
 
 # All LlamaIndex tools needed...LLM, memory, roles, etc
 from llama_index.llms.gemini import Gemini
 from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
-from utils import process_user_query, get_colored_text, get_history_str, hyde, get_num_tokens
+from utils import (
+    process_user_query,
+    get_colored_text,
+    get_history_str,
+    hyde,
+    get_num_tokens
+)
+from prompts import (
+    agent_system_prompt,
+    user_proxy_prompt
+)
 from guardrail import ChatModerator
 from huggingface_hub import login
 from llama_index.core.indices import VectorStoreIndex
@@ -186,18 +197,15 @@ if 'tiktoken_tokenizer' not in st.session_state:
 #     login()  #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 moi tokennn.
 #     st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
 
-agent_system_prompt = "Respond concisely and accurately, using the conversation provided and the context specified in the query. The user may reference documents they provided, which will be given to you as context.\
-    You also have a web search tool and a code exeuction tool which can be used to retrieve real-time information or draw insights when necessary.\
-        If extra information is needed to answer the question, use a web search."
 executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15)
 agent_model_name = "gemini-1.5-flash"
 
-auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt,
+auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt.format(current_date = datetime.now().strftime("%Y-%m-%d")),
                                 llm_config={"config_list": [{"model": agent_model_name, "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
 user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
-                            default_auto_reply="If you have any more important information to add, add it. Otheriwse, respond with 'done'")
+                            default_auto_reply=user_proxy_prompt)
 
 register_function(
     search_tool,
