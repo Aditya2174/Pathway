@@ -469,22 +469,56 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                         if query_class in 'summary' :
                             # Retrieval of large context & then summarizing using LSA
                             retriever.similarity_top_k = 50  # Reset retrieval depth
+                            sentence_count = 2
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
                             if(token_len<40):
                                 response, cost = hyde(response, gemini_model)
                             print(response)
                             st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in retriever.retrieve(response)])}")
-                            context_summaries = clustered_rag_lsa([doc.text for doc in retriever.retrieve(response)], num_clusters=20, sentences_count=3)
+                            context = [doc.text for doc in retriever.retrieve(response)]
+                            context_summaries = clustered_rag_lsa(context, num_clusters=20, sentences_count=sentence_count)
                             context_text = "\n".join(context_summaries)
                             st.write(f"Retrieved Document context size: {sum([get_num_tokens(doc.text) for doc in st.session_state.sec_store.as_retriever().retrieve(response)])}")
                             document_context = [doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)]
-                            sec_context_summaries = clustered_rag_lsa(document_context, num_clusters=int(len(document_context)*0.5), sentences_count=5)
+                            sec_context_summaries = clustered_rag_lsa(document_context, num_clusters=int(len(document_context)*0.5), sentences_count=5) # should i do this?
                             sec_context_text = "\n".join(sec_context_summaries)
+                            st.write(f"LSA sentence count: {sentence_count}")
+                            sufficient, cost = evaluate_sufficiency(combined_context, response)
+                            count = 0
+                            while not sufficient and count<2:
+                                sentence_count *= 2  # Increase sentence count
+                                context_summaries = clustered_rag_lsa(context, num_clusters=20, sentences_count=sentence_count)
+                                context_text = "\n".join(context_summaries)
+                                st.write(f"LSA sentence count: {sentence_count}")
+                                llm_calls += 1 # add an llm call as not sufficient
+                                count += 1
+                                sufficient, cost = evaluate_sufficiency(combined_context, response)
+
                             combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
                             st.write(f"LSA token count: {get_num_tokens(combined_context)}")
                             st.write(combined_context)
-                            sufficient = evaluate_sufficiency(combined_context, response)
+
+                            tup = sufficient or evaluate_sufficiency(combined_context, response)
+                            if not sufficient:
+                                sufficient = tup[0]
+                                cost = tup[1]
+                                total_token_cost += cost
+
+                            if not sufficient:
+                                # Use web search tool if still insufficient
+                                # search_results = web_search_with_logging(response)
+                                search_results = search_tool(response)
+                                combined_context += f"\n\nWeb Search Results:\n{search_results}"
+                                print(f"Search result: {search_results}")
+                                llm_calls += 1
+
+                            tup = sufficient or evaluate_sufficiency(combined_context, response)
+                            if not sufficient:
+                                sufficient = tup[0]
+                                cost = tup[1]
+                                total_token_cost += cost
+                            
                         else :
                             # Initial retrieval of context
                             retriever.similarity_top_k = 5  # Reset retrieval depth
