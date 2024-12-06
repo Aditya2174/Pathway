@@ -469,7 +469,8 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                         if query_class in 'summary' :
                             # Retrieval of large context & then summarizing using LSA
                             retriever.similarity_top_k = 50  # Reset retrieval depth
-                            sentence_count = 4
+                            num_clusters = 20
+                            sentence_count = 10
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
                             # if(token_len<40):
@@ -477,27 +478,27 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             print(response)
                             st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in retriever.retrieve(response)])}")
                             context = [doc.text for doc in retriever.retrieve(response)]
-                            context_summaries = clustered_rag_lsa(context, num_clusters=20, sentences_count=sentence_count)
+                            context_summaries = clustered_rag_lsa(context, sentences_count=sentence_count, num_clusters=num_clusters)
                             context_text = "\n".join(context_summaries)
                             st.write(f"Retrieved Document context size: {sum([get_num_tokens(doc.text) for doc in st.session_state.sec_store.as_retriever().retrieve(response)])}")
                             document_context = [doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)]
                             sec_context_summaries = clustered_rag_lsa(document_context, num_clusters=int(len(document_context)*0.5), sentences_count=5) # should i do this?
                             sec_context_text = "\n".join(sec_context_summaries)
-                            st.write(f"LSA sentence count: {sentence_count}")
+                            # st.write(f"LSA cluster count: {num_clusters} {get_num_tokens(context_text)}")
                             sufficient, cost = evaluate_sufficiency(combined_context, response)
                             count = 0
-                            while not sufficient and count<2:
-                                sentence_count *= 2  # Increase sentence count
-                                context_summaries = clustered_rag_lsa(context, num_clusters=20, sentences_count=sentence_count)
-                                context_text = "\n".join(context_summaries)
-                                st.write(f"LSA sentence count: {sentence_count}")
-                                llm_calls += 1 # add an llm call as not sufficient
-                                count += 1
-                                sufficient, cost = evaluate_sufficiency(combined_context, response)
+                            # while not sufficient:
+                            #     if(count == 3): break
+                            #     num_clusters *= 2  # Increase sentence count
+                            #     context_summaries = clustered_rag_lsa(context, num_clusters=num_clusters, sentences_count=sentence_count)
+                            #     context_text = "\n".join(context_summaries)
+                            #     st.write(f"LSA cluster count: {num_clusters} {get_num_tokens(context_text)}")
+                            #     llm_calls += 1 # add an llm call as not sufficient
+                            #     count += 1
+                            #     sufficient, cost = evaluate_sufficiency(combined_context, response)
 
                             combined_context = f"Database Context:\n{context_text}\n\nUser Document Context:\n{sec_context_text}"
                             st.write(f"LSA token count: {get_num_tokens(combined_context)}")
-                            st.write(combined_context)
 
                             tup = sufficient or evaluate_sufficiency(combined_context, response)
                             if not sufficient:
@@ -518,10 +519,12 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 sufficient = tup[0]
                                 cost = tup[1]
                                 total_token_cost += cost
+
+                            st.write(combined_context)
                             
                         else :
                             # Initial retrieval of context
-                            retriever.similarity_top_k = 5  # Reset retrieval depth
+                            retriever.similarity_top_k = 10  # Reset retrieval depth
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
                             # if(token_len<40):
@@ -563,6 +566,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 sufficient = tup[0]
                                 cost = tup[1]
                                 total_token_cost += cost
+                            st.write(f"Token count : {get_num_tokens(combined_context)}")
                         st.markdown(combined_context, unsafe_allow_html=True)
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
