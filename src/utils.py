@@ -15,14 +15,35 @@ import json
 import os
 import pandas as pd
 import streamlit as st
-from typing import Tuple
+from typing import Tuple, Annotated
 import time
 from prompts import reformulation_type_prompt
 from vertexai.preview import tokenization
 model_name = "gemini-1.5-flash"
 tokenizer = tokenization.get_tokenizer_for_model(model_name)
 
+def search_tool(query: Annotated[str, "The search query"], tavily) -> Annotated[str, "The search results"]:
+    """
+    Perform a search using the Tavily search tool.
+    """
+    try:
+        resp = tavily.search(query=query, search_depth="advanced")
+        result = []
+        for res in resp['results']:
+            temp_result = f"Title: {res['title']}\n"
+            temp_result += f"URL: {res['url']}\n"
+            temp_result += f"Content:\n{res['content']}\n\n"
+            result.append(temp_result)
+        return result
+    except Exception as e:
+        print(f"Error during tavily search: {e}")
+        st.error(f"Error during tavily search: {e}")
+        return f"Error: {e}"
+
 def get_history_str(chat_history):
+    """
+    Get the chat history as a string.
+    """
     chat_history_li = []
     for chat in chat_history:
         if chat.role == MessageRole.USER:
@@ -34,6 +55,9 @@ def get_history_str(chat_history):
     return chat_history_str
 
 def build_prompt(user_query, chat_history = [], retrieved_context = [], doc_context = [], search_results = []):
+    """
+    Build the prompt for the Gemini model.
+    """
     final_prompt = f"# Query: {user_query}\n"
     if chat_history != []:
         chat_history_str = get_history_str(chat_history)
@@ -54,6 +78,9 @@ def build_prompt(user_query, chat_history = [], retrieved_context = [], doc_cont
     return final_prompt
 
 def process_user_query(llm : Gemini , chat_history, user_query, document) -> Tuple[str, str, int]:
+    """
+    Query reformulation using the Gemini model.
+    """
     current_date = datetime.now().strftime("%Y-%m-%d")
     chat_history_li = []
     for chat in chat_history:
@@ -81,15 +108,10 @@ def process_user_query(llm : Gemini , chat_history, user_query, document) -> Tup
     output = resp_li[1].split('Output:')[-1].strip()
     return query_type, output,cost
 
-def get_colored_text(text, color = 'green'):
-    txt = f"""Reformulated to: <span style="color: {color}; font-size: 14px;">{text}</span>"""
-    return txt
-
-def get_num_tokens(txt):
-    num_tokens = tokenizer.count_tokens(txt).total_tokens
-    return num_tokens
-
 def classify_query(llm, user_query, query_type):
+    """
+    Classify the user query using the Gemini model.
+    """
     if 'direct' in query_type:
         # Document is provided
         prompt = PromptTemplate((query_classification_prompt))
@@ -108,6 +130,9 @@ def classify_query(llm, user_query, query_type):
     return query_type
 
 def hyde(input_query, model) -> Tuple[str, int]:
+    """
+    Perform query reformulation using the Hyde model.
+    """
     prompt = PromptTemplate((hyde_prompt))
     prompt = prompt.format(input_query=input_query)
     result = model.complete(prompt, generation_config={'max_output_tokens':300,"temperature":0.2})
@@ -117,11 +142,15 @@ def hyde(input_query, model) -> Tuple[str, int]:
     return f"{input_query}  {query_doc}", cost
     
 def is_plot_in_response(response):
+    """
+    Check if the response contains a plot image.
+    """
     if ('plots/image_' in response) and ('.png' in response):
         return True
     return False
 
 def summarize_history(summarizer, messages):
+    """Summarize the chat history."""
     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
 
     # No need to split if text is short
@@ -261,3 +290,10 @@ def evaluate_sufficiency(gemini_model, context_text: str, query: str, total_cost
         if 'no' in result.text.lower():
             return False, cost
         return True, cost
+
+def get_num_tokens(txt):
+    """
+    Get the number of tokens in the text.
+    """
+    num_tokens = tokenizer.count_tokens(txt).total_tokens
+    return num_tokens

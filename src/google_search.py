@@ -6,21 +6,6 @@ google_api_key = "AIzaSyD939q3PbECaSJO1IAzRbmpqlREgJteLKg"
 google_cse_id = "d3a75edbda16e451e"
 tool_usage_log = {} # Dictionary to track tool usage
 
-def search_tool(query: Annotated[str, "The search query"], tavily) -> Annotated[str, "The search results"]:
-    try:
-        resp = tavily.search(query=query, search_depth="advanced")
-        result = []
-        for res in resp['results']:
-            temp_result = f"Title: {res['title']}\n"
-            temp_result += f"URL: {res['url']}\n"
-            temp_result += f"Content:\n{res['content']}\n\n"
-            result.append(temp_result)
-        return result
-    except Exception as e:
-        print(f"Error during tavily search: {e}")
-        st.error(f"Error during tavily search: {e}")
-        return f"Error: {e}"
-
 # Function to perform web search using Google Custom Search API
 def web_search(query: str, api_key: str, cse_id: str, num_results: int = 5) -> str:
     """

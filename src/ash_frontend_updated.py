@@ -1,7 +1,21 @@
+"""
+Main Frontend file
+Please run it using the following command:
+streamlit run src/ash_frontend_updated.py
+"""
 # Streamlit for UI
 import streamlit as st
 from typing import Dict
 st.set_page_config(layout="wide", initial_sidebar_state="auto")
+
+st.markdown("""
+    <style>
+        .stExpander  {
+            max-height: 300px;  /* Define max height for status containers */
+            overflow-y: auto;  /* Enable scrolling if content overflows */
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # For file-related purposes
 import os
@@ -18,7 +32,6 @@ from llama_index.retrievers.pathway import PathwayRetriever
 from llama_index.core.llms import ChatMessage, MessageRole
 from utils import (
     process_user_query,
-    get_colored_text,
     build_prompt,
     hyde,
     get_num_tokens,
@@ -27,10 +40,10 @@ from utils import (
     summarize_history,
     read_file_from_cache_or_parse,
     evaluate_sufficiency,
+    search_tool
 )
 from analyse_legal import analyze_document_with_context
 from lsa import clustered_rag_lsa
-from google_search import search_tool
 from prompts import (
     agent_system_prompt,
     user_proxy_prompt,
@@ -54,7 +67,6 @@ from transformers import pipeline
 from tavily import TavilyClient
 
 # Tavily search tool setup
-# tavily_api_key = "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"
 tavily_api_key = "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"
 
 hf_token = "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"
@@ -83,6 +95,9 @@ SMALL_FILE_SIZE_THRESHOLD = 0.75 * 1024 * 1024  # 0.75 MB
 # Pathway server configuration
 PATHWAY_HOST = "127.0.0.1"
 PATHWAY_PORT = 8756
+LSA_CHUNK_RETRIEVAL = 50
+LSA_SENTENCE_COUNT = 10
+RETRIEVAL_DEPTH = 5
 
 # Cache directory setup using diskcache
 cache_dir = './document_cache'
@@ -101,11 +116,11 @@ def cleanup_cache():
 
 atexit.register(cleanup_cache)
 
-os.makedirs("coding", exist_ok=True)    # Create a working directory for code executor
+os.makedirs("coding", exist_ok=True)  # Create a working directory for code executor
 
 gemini_model = Gemini(model="models/gemini-1.5-flash", api_key=google_api_key)  # Initialize a Gemini-1.5-Flash model with LlamaIndex
 
-retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT, similarity_top_k=5)
+retriever = PathwayRetriever(host=PATHWAY_HOST, port=PATHWAY_PORT, similarity_top_k=RETRIEVAL_DEPTH) # Initialize a PathwayRetriever
 
 # Initialize session variables
 if 'chat_messages' not in st.session_state:
@@ -133,6 +148,7 @@ if 'query_classes' not in st.session_state:
 if 'analyse_doc_mode' not in st.session_state:
     st.session_state.analyse_doc_mode = False
 
+# Cache resources so that they are not reloaded on every refresh
 @st.cache_resource
 def get_moderator():
     # login()  #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 moi tokennn.
@@ -154,31 +170,23 @@ chat_summarizer = get_chat_summarizer()
 
 print("All resources loaded successfully!")
 
-executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15)
-agent_model_name = "gemini-1.5-flash"
+executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15) # Code executor for the user proxy agent
+agent_model_name = "gemini-1.5-flash" # Model name for the generator agent
 
 auto_agent = ConversableAgent(name="assistant", human_input_mode="NEVER", system_message=agent_system_prompt.format(current_date = datetime.now().strftime("%Y-%m-%d"), plot_count=st.session_state.plot_count),
                                 llm_config={"config_list": [{"model": agent_model_name, "temperature": 0.5, "api_key": os.environ.get("GOOGLE_API_KEY"), "api_type": "google"}]},
                                 code_execution_config=False)
 
 user_proxy_code = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config={'executor': executor},
-                            default_auto_reply=user_proxy_prompt)
+                            default_auto_reply=user_proxy_prompt) # User proxy agent for code execution
 
 user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_consecutive_auto_reply=1, code_execution_config=False,
-                            default_auto_reply=user_proxy_prompt)
+                            default_auto_reply=user_proxy_prompt) # User proxy agent for normal queries
 
+# Directory for storing large files
 LARGE_FILE_DIRECTORY = '../data/'
 
 combined_attached_text = ""
-
-st.markdown("""
-    <style>
-        .stExpander  {
-            max-height: 300px;  /* Define max height for status containers */
-            overflow-y: auto;  /* Enable scrolling if content overflows */
-        }
-    </style>
-""", unsafe_allow_html=True)
 
 
 # Document uploader for including document text in the chat prompt
@@ -241,12 +249,16 @@ for chat in st.session_state.chat_messages_display:
     with st.chat_message(role):
         st.write(chat.content, unsafe_allow_html=True)
         if (role == 'assistant') and is_plot_in_response(chat.content) and ('code_execution' in st.session_state.query_classes[idx]):
+            # Display plots generated by the code executor
             image_idx = chat.content.split('plots/image_')[1].split('.png')[0]
             st.image(f'coding/plots/image_{image_idx}.png')
         if (role == 'assistant'):
             idx += 1
 
-def solve_user_query(user_input:str) -> Dict[str, str]:
+def rag_pipeline(user_input:str) -> Dict[str, str]:
+    """
+    Function to process user query and generate response
+    """
     global combined_attached_text
     output = dict()
     combined_context = ""
@@ -277,21 +289,27 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
         status0.update(label="Summarized successfully", expanded=False)
 
     with st.status("Analyzing user query...", expanded=False) as status1:
-        # contextualized_prompt = contextualize_prompt(user_input)
         document_txt = combined_attached_text if combined_attached_text else ""
+
+        # Reformulation and query processing
         query_type, response, cost = process_user_query(gemini_model, st.session_state.chat_messages, user_input, document=document_txt)
         total_token_cost += cost
+
         st.write(f"Query Type: {query_type}")
         st.write(f"Reformed query: {response}")
         st.write(f"Token cost: {cost}")
+
     status1.update(label=f'Query Type: {query_type}', expanded=False, state='complete')
 
     # Handle responses based on query type
     if "general" in query_type.lower():
+        # General chi-chat response
         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=response)
         stored_response = response
+
         st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
         st.session_state.chat_messages.append(assistant_message)
+
         with st.chat_message("assistant"):
             st.write(response)
 
@@ -300,22 +318,28 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
         st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=response))
 
         with st.status(label="Classifying user query...", expanded=False) as status5:
+            # Classify the query into different categories
             query_class = classify_query(gemini_model, user_input, query_type)
+
             st.session_state.query_classes.append(query_class)
             st.write("Query Classification:", query_class)
         status5.update(label=f'Query class: {query_class}')
 
         if 'direct' in query_type.lower():
+            # Respond directly from the user document
             print("Query Type: Direct")
             with st.status("Generating response...", expanded=False) as status2:
                 st.write("Query Type: Direct")
                 try:
                     if 'summary' in query_class.lower():
-                        sec_store_retrieved = st.session_state.sec_store.as_retriever(similarity_top_k = 50).retrieve(response)
+                        # Retrieve from secondary vector store
+                        sec_store_retrieved = st.session_state.sec_store.as_retriever(similarity_top_k = LSA_CHUNK_RETRIEVAL).retrieve(response)
+
                         st.write(f"Retrieved Document context size: {sum([get_num_tokens(doc.text) for doc in sec_store_retrieved])}")
+
                         document_context = [doc.text for doc in sec_store_retrieved]
 
-                        sec_context = clustered_rag_lsa(lsa_embedder, document_context, num_clusters=int(len(document_context)*0.5), sentences_count=5)
+                        sec_context = clustered_rag_lsa(lsa_embedder, document_context, num_clusters=int(len(document_context)*0.5), sentences_count=LSA_SENTENCE_COUNT)
 
                     else:
                         sec_context = st.session_state.sec_store.as_retriever().retrieve(response)
@@ -328,11 +352,13 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                                 doc_context=[doc for doc in sec_context])
 
                     if 'code_execution' in query_class.lower():
+                        # Pass it to the user proxy agent with code execution enabled
                         chat_result = user_proxy_code.initiate_chat(recipient=auto_agent, message=final_prompt)
                     else:
+                        # Pass it to the user proxy agent
                         chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=final_prompt)
-                    assistant_responses = []
 
+                    assistant_responses = []
                     for message in chat_result.chat_history:
                         if message['name'] == "assistant":
                             llm_calls += 1
@@ -342,30 +368,31 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
 
                     # Combine all assistant responses into one message
                     unified_response = "\n\n".join(assistant_responses)
+
                     total_token_cost += chat_result.cost['usage_including_cached_inference'][agent_model_name]['total_tokens']
                     stored_response = unified_response
                     assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=unified_response)
+
                     st.write(unified_response, unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
 
             with st.chat_message("assistant"):
                 st.write(unified_response, unsafe_allow_html=True)
+
             st.session_state.chat_messages.append(assistant_message)
             status2.update(label="Generation Complete!", expanded=False)
 
         elif "context" in query_type.lower():
+            # Respond after retrieving context
             print("Query Type: Context")
             sufficient = None
             with st.status("Retrieving data...", expanded=False) as status3:
                 try:
                     if 'code_execution' in query_class.lower():
-                        retriever.similarity_top_k = 5
+                        retriever.similarity_top_k = RETRIEVAL_DEPTH
                         token_len = get_num_tokens(response)
                         print(f"no of tokens: {token_len}")
-                        # if(token_len<40):
-                        #     response, cost = hyde(response, gemini_model)
-                        #     total_token_cost += cost
                         print(response)
                         primary_context = retriever.retrieve(response)
                         sec_context = st.session_state.sec_store.as_retriever().retrieve(response)
@@ -378,26 +405,32 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
 
                     elif 'summary' in query_class.lower():
                         # Retrieval of large context & then summarizing using LSA
-                        retriever.similarity_top_k = 50  # Reset retrieval depth
+                        retriever.similarity_top_k = LSA_CHUNK_RETRIEVAL  # Reset retrieval depth
                         token_len = get_num_tokens(response)
+
                         print(f"no of tokens: {token_len}")
-                        # if(token_len<40):
-                        #     response, cost = hyde(response, gemini_model)
                         print(response)
 
                         primary_store_retrieved = retriever.retrieve(response)
+
                         st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in primary_store_retrieved])}")
-                        context_summaries = clustered_rag_lsa(lsa_embedder, [doc.text for doc in primary_store_retrieved], num_clusters=20, sentences_count=10)
+
+                        context_summaries = clustered_rag_lsa(lsa_embedder, [doc.text for doc in primary_store_retrieved], num_clusters=20, sentences_count=LSA_SENTENCE_COUNT)
 
                         sec_store_retrieved = st.session_state.sec_store.as_retriever().retrieve(response)
+
                         st.write(f"Retrieved Document context size: {sum([get_num_tokens(doc.text) for doc in sec_store_retrieved])}")
+
                         document_context = [doc.text for doc in sec_store_retrieved]
 
-                        sec_context_summaries = clustered_rag_lsa(lsa_embedder, document_context, num_clusters=int(len(document_context)*0.5), sentences_count=5)
+                        sec_context_summaries = clustered_rag_lsa(lsa_embedder, document_context, num_clusters=int(len(document_context)*0.5), sentences_count=LSA_SENTENCE_COUNT)
 
                         combined_context = build_prompt(response, doc_context=sec_context_summaries, retrieved_context=context_summaries)
+
                         st.write(f"LSA token count: {get_num_tokens(combined_context)}")
                         st.text(combined_context)
+
+                        # Evaluate the sufficiency of the current context
                         sufficient, cost = evaluate_sufficiency(gemini_model, combined_context, response, total_token_cost)
 
                         final_prompt = build_prompt(response, chat_history=st.session_state.chat_messages,
@@ -406,12 +439,10 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                         primary_context = context_summaries
                     else:
                         # Initial retrieval of context
-                        retriever.similarity_top_k = 5  # Reset retrieval depth
+                        retriever.similarity_top_k = RETRIEVAL_DEPTH  # Reset retrieval depth
                         token_len = get_num_tokens(response)
+
                         print(f"no of tokens: {token_len}")
-                        # if(token_len<40):
-                        #     response, cost = hyde(response, gemini_model)
-                        #     total_token_cost += cost
                         print(response)
 
                         primary_context = retriever.retrieve(response)
@@ -420,17 +451,21 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                         combined_context = build_prompt(response, doc_context=[doc.text for doc in sec_context], retrieved_context=[doc.text for doc in primary_context])
 
                         llm_calls += 1
+
+                        # Evaluate the sufficiency of the current context
                         sufficient, cost = evaluate_sufficiency(gemini_model, combined_context, response, total_token_cost)
                         
                         if not sufficient:
-                            retriever.similarity_top_k += 5  # Increase retrieval depth
+                            # If not sufficient, increase retrieval depth
+                            retriever.similarity_top_k += RETRIEVAL_DEPTH  # Increase retrieval depth
 
                             primary_context = retriever.retrieve(response)
                             sec_context = st.session_state.sec_store.as_retriever().retrieve(response)
 
                             combined_context = build_prompt(response, doc_context=[doc.text for doc in sec_context], retrieved_context=[doc.text for doc in primary_context])
                             llm_calls += 1 # add an llm call as not sufficient
-                    
+
+                        # Again evaluate the sufficiency of the current context
                         tup = sufficient or evaluate_sufficiency(gemini_model, combined_context, response, total_token_cost)
                         if not sufficient:
                             sufficient = tup[0]
@@ -440,14 +475,16 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                     if not sufficient:
                         # Use web search tool if still insufficient
                         search_results = search_tool(response, tavily_client)
+
                         try:
-                            combined_context = build_prompt(response, doc_context=[doc.text for doc in sec_context[:5]], retrieved_context=[doc.text for doc in primary_context[:5]], search_results=search_results)
+                            # Build prompt with search results and a combination of retrieved and document context
+                            combined_context = build_prompt(response, doc_context=[doc.text for doc in sec_context[:RETRIEVAL_DEPTH]], retrieved_context=[doc.text for doc in primary_context[:RETRIEVAL_DEPTH]], search_results=search_results)
                             final_prompt = build_prompt(response, chat_history=st.session_state.chat_messages,
-                                                doc_context=[doc.text for doc in sec_context[:5]], retrieved_context=[doc.text for doc in primary_context], search_results=search_results[:5])
+                                                doc_context=[doc.text for doc in sec_context[:RETRIEVAL_DEPTH]], retrieved_context=[doc.text for doc in primary_context], search_results=search_results[:RETRIEVAL_DEPTH])
                         except:
-                            combined_context = build_prompt(response, doc_context=[doc for doc in sec_context[:5]], retrieved_context=[doc for doc in primary_context[:5]], search_results=search_results)
+                            combined_context = build_prompt(response, doc_context=[doc for doc in sec_context[:RETRIEVAL_DEPTH]], retrieved_context=[doc for doc in primary_context[:RETRIEVAL_DEPTH]], search_results=search_results)
                             final_prompt = build_prompt(response, chat_history=st.session_state.chat_messages,
-                                                doc_context=[doc.text for doc in sec_context[:5]], retrieved_context=[doc.text for doc in primary_context[:5]], search_results=search_results)
+                                                doc_context=[doc.text for doc in sec_context[:RETRIEVAL_DEPTH]], retrieved_context=[doc.text for doc in primary_context[:RETRIEVAL_DEPTH]], search_results=search_results)
 
                         llm_calls += 1
                     else:
@@ -458,6 +495,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             final_prompt = build_prompt(response, chat_history=st.session_state.chat_messages,
                                                     doc_context=[doc for doc in sec_context], retrieved_context=[doc for doc in primary_context])
                     
+                    # Check the sufficiency again
                     tup = sufficient or evaluate_sufficiency(gemini_model, combined_context, response, total_token_cost)
                     if not sufficient:
                         sufficient = tup[0]
@@ -472,7 +510,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
 
             if not sufficient:
                 # Notify the user about insufficiency
-                res = """I couldn't find sufficient context to fully answer your query based on available documents and web search. Please provide a clarified query."""
+                res = """Sorry, I couldn't find sufficient context to fully answer your query based on available documents and web search. Please provide a clarified query."""
                 assistant_message = ChatMessage(role=MessageRole.ASSISTANT,content=res)
                 
                 stored_response = res
@@ -480,12 +518,14 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                 with st.chat_message("assistant"):
                     st.write(assistant_message.content)
             else:
-
                 with st.status("Generating response...", expanded=False) as status2:
                     print(final_prompt)
+
                     if 'code_execution' in query_class.lower():
+                        # Pass it to the user proxy agent with code execution enabled
                         chat_result = user_proxy_code.initiate_chat(recipient=auto_agent, message=final_prompt)
                     else:
+                        # Pass it to the user proxy agent
                         chat_result = user_proxy.initiate_chat(recipient=auto_agent, message=final_prompt)
 
                     assistant_responses = [message['content'] for message in chat_result.chat_history if (message['name'] == "assistant") and ((message['content'] != "done") and (len(message['content']) > 5))]
@@ -513,19 +553,23 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
     output['llm_calls'] = llm_calls
     output['total_token_cost'] = total_token_cost
     return output
+
 # Chat input
 if user_input := st.chat_input("Enter your chat prompt:"):
+    # Guardrail to prevent unsafe queries
     result = moderator.moderate_chat([{"role": "user", "content": user_input}])
-    print(result)
+
+    print(f"Guardrail result: {result}")
     result = result.split('\n')[0]
 
     if not 'unsafe' in result.lower():
+        # Safe query
         if st.session_state.analyse_doc_mode:
             with st.chat_message("user"):
                 st.write(user_input)
             
             with st.spinner("Getting the response..."):
-                response = analyze_document_with_context(combined_attached_text, user_input)
+                response = analyze_document_with_context(gemini_model, combined_attached_text, user_input)
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
             st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=response))
 
@@ -533,12 +577,14 @@ if user_input := st.chat_input("Enter your chat prompt:"):
                 st.write(response)
 
         else:
-            output = solve_user_query(user_input)
+            # Pass the user query to RAG pipeline
+            output = rag_pipeline(user_input)
 
             if is_plot_in_response(output['response']) and ('code_execution' in st.session_state.query_classes[-1]):
                 st.image(f'coding/plots/image_{st.session_state.plot_count}.png')
                 st.session_state.plot_count += 1
     else:
+        # Unsafe query
         print("Unsafe query detected:")
         with st.chat_message("user"):
             st.write(user_input)

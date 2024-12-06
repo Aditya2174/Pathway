@@ -19,7 +19,9 @@ if 'chat_messages' not in st.session_state:
 LANGUAGE = "english"
 
 def summarize(context_docs, sentences_count=5):
-
+    """
+    Summarize the given text using LSA (Latent Semantic Analysis).
+    """
     SENTENCES_COUNT = sentences_count
     # The text you want to summarize
     text = "\n\n".join(context_docs)
@@ -39,8 +41,9 @@ def summarize(context_docs, sentences_count=5):
     return summary
 
 def clustered_rag_lsa(embedder, context_docs, num_clusters=5, sentences_count=5):
-
-     
+    """
+    Cluster the context documents and summarize each cluster using LSA.
+    """     
     if context_docs == []:
         return context_docs
     document_embeddings = embedder.encode(context_docs)

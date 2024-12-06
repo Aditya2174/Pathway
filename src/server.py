@@ -6,10 +6,8 @@ from pathway.xpacks.llm.embedders import SentenceTransformerEmbedder
 from pathway.xpacks.llm.parsers import ParseUnstructured
 
 # Pathway configuration
-# model = SentenceTransformer('all-MiniLM-L6-v2')
-# splitter = DefaultTokenCountSplitter()
 splitter = SlidingWindowSplitter(max_tokens=768, overlap_tokens=64)
-# embedder = SentenceTransformerEmbedder(model='all-MiniLM-L6-v2')
+
 embedder = SentenceTransformerEmbedder(model='nomic-ai/nomic-embed-text-v1.5', **{'trust_remote_code': True})
 parser = ParseUnstructured()
 

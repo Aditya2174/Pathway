@@ -1,5 +1,9 @@
+# Description: This file contains the prompts for the tasks in the evaluation pipeline.
+
+# Default prompt when the query is unsafe
 unsafe_query_resp = "I am sorry, I cannot process this query. If you have any other queries, please feel free to ask."
 
+# Prompt for the task of evaluating the relevance of the context to the user query
 evaluate_sufficiency_prompt = """You are an intelligent AI assistant. You will be provided with a user query and a context. Your task is to evaluate whether the context provided is sufficient to answer the user query.
 The context may not be enough to fully answer the query, but provided it is relevant, you should respond with 'yes'. In any other case, respond with 'no'.
 Only respond with 'yes' or 'no'. Do not provide any other explanation or response.
@@ -193,6 +197,7 @@ Answer: search
 User Query: {user_query}
 Answer:"""
 
+# System prompt of the agent
 agent_system_prompt = """You are a helpful AI assistant with expertise in legal and financial matters and general knowledge of the world. The current date in YYYY-MM-DD format is {current_date}. Additionally, you have the ability to write code when required to assist with queries. You will be provided with a query and context relevant to the query.
 
 Your task is to:
@@ -212,8 +217,10 @@ Your task is to:
 
 Be clear, accurate, and avoid unnecessary elaboration."""
 
+# System prompt of user proxy
 user_proxy_prompt = """If you have more information to share about the same, state it; otherwise, strictly respond with 'done' and nothing else."""
 
+# HYDE prompt for the task of expanding queries into passages
 hyde_prompt = """If you have knowledge about the topic write a passage that answers the given query, else if you are not aware of the answer expand the given query into a text document for retrieval adding similar keywords and avoid ambiguous words or questions.Return only 3-4 sentences.
 Query: what does chattel mean on credit history
 Passage: A “Chattel” notation on a credit history report is a type of loan that is secured by a person's tangible property. This type of loan typically includes items such as vehicles, furniture and appliances. Chattel loans are typically obtained for the purposes of making major purchases, such as a car or home appliances. By using the credit report, lenders can check to see if a person has taken out a chattel loan in the past.
@@ -221,3 +228,74 @@ Query: How much does Microsoft earn annually?
 Passage: Microsoft's annual earnings.  Information sought pertains to Microsoft's total annual revenue or profit.  The query aims to retrieve data on the company's financial performance on a yearly basis.
 Query: {input_query}
 Passage:"""
+
+# Unsafe content categories for moderation
+unsafe_categories = """
+        O1: Violence and Hate.
+        Should not:
+        - Assist in planning or executing violent acts.
+        - Encourage, glorify, or condone violence or hateful behavior.
+        - Express hateful, derogatory, or demeaning sentiments based on race, color, religion, national origin, gender, sexual orientation, gender identity, or disability.
+        - Use slurs or insults based on personal characteristics.
+        Can:
+        - Discuss violence and hate in an educational context.
+        - Provide information on historical or societal events involving violence or discrimination.
+
+        O2: Criminal Activities.
+        Should not:
+        - Assist in planning or committing crimes (e.g., theft, fraud, kidnapping).
+        - Encourage or condone criminal activities.
+        Can:
+        - Explain how crimes occur (without detailed instructions).
+        - Discuss crime prevention methods (without exposing vulnerabilities).
+
+        O3: Sexual Content.
+        Should not:
+        - Engage in sexually explicit or erotic conversations.
+        - Encourage sexual activities or risky behavior.
+        Can:
+        - Discuss topics related to sexual health, education, and safety.
+        - Provide general information about sexuality.
+
+        O4: Weapons and Firearms.
+        Should not:
+        - Assist in planning or executing crimes involving weapons.
+        - Provide instructions for creating, modifying, or using illegal weapons.
+        Can:
+        - Discuss firearms in a general or regulatory context.
+        - Debate gun control and ownership rights.
+
+        O5: Controlled Substances.
+        Should not:
+        - Encourage or assist in using, trafficking, or creating illegal substances (e.g., drugs, alcohol, tobacco).
+        - Provide step-by-step instructions for substance production.
+        Can:
+        - Provide general information about substances and their effects.
+        - Discuss the societal impact of substance use.
+
+        O6: Self-Harm and Suicide.
+        Should not:
+        - Encourage or romanticize self-harm or suicide.
+        - Provide methods or instructions related to self-harm.
+        Can:
+        - Offer general information on mental health issues.
+        - Provide resources and support options for those in distress.
+
+        O7: Financial Misconduct and Market Manipulation.
+        Should not:
+        - Provide insider information or encourage insider trading.
+        - Offer false or misleading financial advice with the intent to deceive or manipulate.
+        - Promote investment schemes or scams, including pump-and-dump tactics.
+        - Encourage illegal activities in financial markets (e.g., tax evasion, money laundering).
+        Can:
+        - Discuss general investment strategies and market trends.
+        - Provide educational content on financial literacy and lawful investing.
+
+        O8: Dangerous or Harmful Activities.
+        Should not:
+        - Encourage risky, illegal, or harmful behaviors (e.g., extreme stunts, unsafe challenges).
+        - Provide details that could enable harm.
+        - Encourage planning of killing, murder or any illegal activity.
+        Can:
+        - Discuss safety measures and harm reduction strategies.
+        """

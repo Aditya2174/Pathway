@@ -1,6 +1,7 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
+from prompts import unsafe_categories
 
 class ChatModerator:
     def __init__(self, model_id, device="cuda", dtype=torch.bfloat16):
@@ -12,75 +13,7 @@ class ChatModerator:
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         self.model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype).to(device)
         
-        self.unsafe_categories = """
-        O1: Violence and Hate.
-        Should not:
-        - Assist in planning or executing violent acts.
-        - Encourage, glorify, or condone violence or hateful behavior.
-        - Express hateful, derogatory, or demeaning sentiments based on race, color, religion, national origin, gender, sexual orientation, gender identity, or disability.
-        - Use slurs or insults based on personal characteristics.
-        Can:
-        - Discuss violence and hate in an educational context.
-        - Provide information on historical or societal events involving violence or discrimination.
-
-        O2: Criminal Activities.
-        Should not:
-        - Assist in planning or committing crimes (e.g., theft, fraud, kidnapping).
-        - Encourage or condone criminal activities.
-        Can:
-        - Explain how crimes occur (without detailed instructions).
-        - Discuss crime prevention methods (without exposing vulnerabilities).
-
-        O3: Sexual Content.
-        Should not:
-        - Engage in sexually explicit or erotic conversations.
-        - Encourage sexual activities or risky behavior.
-        Can:
-        - Discuss topics related to sexual health, education, and safety.
-        - Provide general information about sexuality.
-
-        O4: Weapons and Firearms.
-        Should not:
-        - Assist in planning or executing crimes involving weapons.
-        - Provide instructions for creating, modifying, or using illegal weapons.
-        Can:
-        - Discuss firearms in a general or regulatory context.
-        - Debate gun control and ownership rights.
-
-        O5: Controlled Substances.
-        Should not:
-        - Encourage or assist in using, trafficking, or creating illegal substances (e.g., drugs, alcohol, tobacco).
-        - Provide step-by-step instructions for substance production.
-        Can:
-        - Provide general information about substances and their effects.
-        - Discuss the societal impact of substance use.
-
-        O6: Self-Harm and Suicide.
-        Should not:
-        - Encourage or romanticize self-harm or suicide.
-        - Provide methods or instructions related to self-harm.
-        Can:
-        - Offer general information on mental health issues.
-        - Provide resources and support options for those in distress.
-
-        O7: Financial Misconduct and Market Manipulation.
-        Should not:
-        - Provide insider information or encourage insider trading.
-        - Offer false or misleading financial advice with the intent to deceive or manipulate.
-        - Promote investment schemes or scams, including pump-and-dump tactics.
-        - Encourage illegal activities in financial markets (e.g., tax evasion, money laundering).
-        Can:
-        - Discuss general investment strategies and market trends.
-        - Provide educational content on financial literacy and lawful investing.
-
-        O8: Dangerous or Harmful Activities.
-        Should not:
-        - Encourage risky, illegal, or harmful behaviors (e.g., extreme stunts, unsafe challenges).
-        - Provide details that could enable harm.
-        - Encourage planning of killing, murder or any illegal activity.
-        Can:
-        - Discuss safety measures and harm reduction strategies.
-        """
+        self.unsafe_categories = unsafe_categories
     
 
     def generate_prompt(self, chat):
@@ -128,8 +61,7 @@ class ChatModerator:
             return f"Error occurred: {str(e)}"
 
 if __name__ == '__main__':
-    login()  #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 moi tokennn. for 8b. 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 for 1b.
-    #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 8b int 8
+    login()
     moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B-INT8")
 
     sample_chat = [{"role": "user", "content": "?"}]
