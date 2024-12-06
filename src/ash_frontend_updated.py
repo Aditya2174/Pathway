@@ -203,9 +203,9 @@ if 'sec_store' not in st.session_state:
     st.session_state.sec_store = VectorStoreIndex.from_documents(documents=st.session_state.uploaded_docs, **{'embed_model': st.session_state.sec_embedder})
 if 'tiktoken_tokenizer' not in st.session_state:
     st.session_state.tiktoken_tokenizer = tiktoken.encoding_for_model('gpt-4')
-if 'moderator' not in st.session_state:
+# if 'moderator' not in st.session_state:
     # login()  #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 moi tokennn.
-    st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
+    # st.session_state.moderator = ChatModerator(model_id="meta-llama/Llama-Guard-3-8B")
 
 executor = LocalCommandLineCodeExecutor(work_dir="coding", timeout=15)
 agent_model_name = "gemini-1.5-flash"
@@ -469,11 +469,11 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                         if query_class in 'summary' :
                             # Retrieval of large context & then summarizing using LSA
                             retriever.similarity_top_k = 50  # Reset retrieval depth
-                            sentence_count = 2
+                            sentence_count = 4
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
-                            if(token_len<40):
-                                response, cost = hyde(response, gemini_model)
+                            # if(token_len<40):
+                            #     response, cost = hyde(response, gemini_model)
                             print(response)
                             st.write(f"Retrieved Database context size: {sum([get_num_tokens(doc.text) for doc in retriever.retrieve(response)])}")
                             context = [doc.text for doc in retriever.retrieve(response)]
@@ -509,7 +509,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 # Use web search tool if still insufficient
                                 # search_results = web_search_with_logging(response)
                                 search_results = search_tool(response)
-                                combined_context += f"\n\nWeb Search Results:\n{search_results}"
+                                combined_context = f"\n\nWeb Search Results:\n{search_results}" + combined_context
                                 print(f"Search result: {search_results}")
                                 llm_calls += 1
 
@@ -524,9 +524,9 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                             retriever.similarity_top_k = 5  # Reset retrieval depth
                             token_len = get_num_tokens(response)
                             print(f"no of tokens: {token_len}")
-                            if(token_len<40):
-                                response, cost = hyde(response, gemini_model)
-                                total_token_cost += cost
+                            # if(token_len<40):
+                            #     response, cost = hyde(response, gemini_model)
+                            #     total_token_cost += cost
                             print(response)
                             context_text = "\n".join([doc.text for doc in retriever.retrieve(response)])
                             sec_context_text = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
@@ -538,7 +538,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 retriever.similarity_top_k += 5  # Increase retrieval depth
                                 additional_context = "\n".join([doc.text for doc in retriever.retrieve(response)])
                                 additional_sec_context = "\n".join([doc.text for doc in st.session_state.sec_store.as_retriever().retrieve(response)])
-                                combined_context += f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
+                                new_combined_context = f"\n\nAdditional Context:\n{additional_context}\n\nAdditional User Document Context:\n{additional_sec_context}"
                                 llm_calls += 1 # add an llm call as not sufficient
                             
                         
@@ -547,12 +547,14 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 sufficient = tup[0]
                                 cost = tup[1]
                                 total_token_cost += cost
+                            else:
+                                combined_context = new_combined_context
                             
                             if not sufficient:
                                 # Use web search tool if still insufficient
                                 # search_results = web_search_with_logging(response)
                                 search_results = search_tool(response)
-                                combined_context += f"\n\nWeb Search Results:\n{search_results}"
+                                combined_context = f"\n\nWeb Search Results:\n{search_results}" + combined_context
                                 print(f"Search result: {search_results}")
                                 llm_calls += 1
                             
@@ -561,7 +563,7 @@ def solve_user_query(user_input:str) -> Dict[str, str]:
                                 sufficient = tup[0]
                                 cost = tup[1]
                                 total_token_cost += cost
-                        st.write(combined_context)
+                        st.markdown(combined_context, unsafe_allow_html=True)
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
                         traceback.print_exc()
