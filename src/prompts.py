@@ -1,3 +1,14 @@
+unsafe_query_resp = "I am sorry, I cannot process this query. If you have any other queries, please feel free to ask."
+
+evaluate_sufficiency_prompt = """You are an intelligent AI assistant. You will be provided with a user query and a context. Your task is to evaluate whether the context provided is sufficient to answer the user query.
+The context may not be enough to fully answer the query, but provided it is relevant, you should respond with 'yes'. In any other case, respond with 'no'.
+Only respond with 'yes' or 'no'. Do not provide any other explanation or response.
+
+Query: {query}
+Context:
+{context}
+Response:"""
+
 # Reformulate the query and find the type of the query
 reformulation_type_prompt = """You are an intelligent AI assistant. The current date in YYYY-MM-DD format is {current_date}. You will be provided with:
 1. Chat history between the user and the chatbot.

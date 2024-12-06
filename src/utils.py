@@ -6,7 +6,8 @@ from prompts import (
     reformulation_type_prompt_no_doc,
     query_classification_prompt,
     query_classification_prompt_no_doc,
-    hyde_prompt
+    hyde_prompt,
+    evaluate_sufficiency_prompt
 )
 from llama_index.llms.gemini import Gemini
 import pdfplumber
@@ -37,6 +38,10 @@ def build_prompt(user_query, chat_history = [], retrieved_context = [], doc_cont
     if chat_history != []:
         chat_history_str = get_history_str(chat_history)
         final_prompt += f"# Chat History:\n{chat_history_str}\n"
+    if search_results != []:
+        final_prompt += "# Web Search Results:\n"
+        for i, result in enumerate(search_results):
+            final_prompt += f"## Web Search Result {i+1}:\n{result}\n"
     if doc_context != []:
         final_prompt += "# User Document Context:\n"
         for i, context in enumerate(doc_context):
@@ -45,10 +50,6 @@ def build_prompt(user_query, chat_history = [], retrieved_context = [], doc_cont
         final_prompt += "# Retrieved Document Context:\n"
         for i, context in enumerate(retrieved_context):
             final_prompt += f"## Retrieved Document {i+1}:\n{context}\n"
-    if search_results != []:
-        final_prompt += "# Web Search Results:\n"
-        for i, result in enumerate(search_results):
-            final_prompt += f"## Web Search Result {i+1}:\n{result}\n"
     
     return final_prompt
 
@@ -120,11 +121,8 @@ def is_plot_in_response(response):
         return True
     return False
 
-def summarize_history(messages):
+def summarize_history(summarizer, messages):
     history_text = " ".join([msg.content for msg in messages if msg.role != MessageRole.SYSTEM])
-
-    # Use cached summarizer for processing
-    summarizer = st.session_state.summarizer
 
     # No need to split if text is short
     if len(history_text) <= 1000:
@@ -250,15 +248,9 @@ def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold, lar
 
 def evaluate_sufficiency(gemini_model, context_text: str, query: str, total_cost :int) -> Tuple[bool, int]:
         """Use Gemini model to evaluate if the retrieved context suffices to answer the query."""
-        evaluation_prompt = (
-            f"Question: {query}\n\n"
-            f"Context:\n{context_text}\n\n"
-            "Does the context provide sufficient information to fully answer the question?"
-            "Respond with 'Yes' or 'No' only."
-        )
+        evaluation_prompt = PromptTemplate(evaluate_sufficiency_prompt).format(query=query, context=context_text)
         time.sleep(1) # To avoid rate limiting
-        # result = gemini_model.generate_response(evaluation_prompt)
-        result = gemini_model.chat([ChatMessage(content=evaluation_prompt, role=MessageRole.USER)])
+        result = gemini_model.complete(evaluation_prompt)
         cost = result.raw['usage_metadata']['total_token_count']
         if 'no' in result.message.content.lower():
             return False, cost
