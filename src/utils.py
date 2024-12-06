@@ -173,12 +173,12 @@ def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold, lar
 
         elif file_type == "text/plain":
             with open(large_file_path, "r", encoding="utf-8") as f:
-                attached_text = f.read(1000)  # Limit to the first 1000 characters
+                attached_text = f.read(4096)
 
         elif file_type == "application/json":
             with open(large_file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            attached_text = json.dumps(data, indent=2)[:1000]  # Limit JSON preview to 1000 characters
+            attached_text = json.dumps(data, indent=2)[:4096]  # Limit JSON preview to 1000 characters
 
         elif file_type == "text/csv":
             df = pd.read_csv(large_file_path)
