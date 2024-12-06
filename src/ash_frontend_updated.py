@@ -155,6 +155,17 @@ user_proxy = UserProxyAgent(name="user_proxy", human_input_mode="NEVER", max_con
 LARGE_FILE_DIRECTORY = '../data/'
 
 combined_attached_text = ""
+
+st.markdown("""
+    <style>
+        .stExpander  {
+            max-height: 300px;  /* Define max height for status containers */
+            overflow-y: auto;  /* Enable scrolling if content overflows */
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+
 # Document uploader for including document text in the chat prompt
 with st.sidebar:
     st.subheader("Upload Documents")
