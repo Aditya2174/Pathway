@@ -19,6 +19,7 @@ Your task is to determine the query type and generate an output according to the
 - If the query is chit-chat or conversational in nature (e.g., greetings like 'hello', 'hi', or expressions of gratitude like 'thanks') and doesn't require any particular information to be answered, respond with query type as 'general' and output as a polite response to the query.
 - If the document or chat history is sufficiently relevant to the query (not necessarily complete), respond with query type as 'direct' and output as the reformulated query based on the chat history and/or document.
 - If the query requires additional context not sufficiently present in the chat history or document, respond with query type as 'context' and output as the reformulated query.
+- If the query is completely unrelated to the chat history and document, respond with query type as 'context' and output as the grammatically corrected version of the query.
 
 **Note:**
 - The reformulated query should always be grammatically correct and contextually rich.
@@ -88,6 +89,7 @@ reformulation_type_prompt_no_doc = """You are an intelligent AI assistant. The c
 Your task is to determine the query type and generate an output according to the following rules:
 - If the query is chit-chat or conversational in nature (e.g., greetings like 'hello', 'hi', or expressions of gratitude like 'thanks') and doesn't require any particular information to be answered, respond with query type as 'general' and output as a polite response to the query.
 - If the query requires additional context not sufficiently present in the chat history, respond with query type as 'context' and output as the reformulated query.
+- If the query is completely unrelated to the chat history and document, respond with query type as 'context' and output as the grammatically corrected version of the query.
 
 **Note:**
 - The reformulated query should always be grammatically correct and contextually rich.
@@ -126,7 +128,7 @@ User Query: {user_query}
 # Classify the user query into one of these categories: code_execution, summary, search, analysis, comparison
 query_classification_prompt = """You are an intelligent AI assistant. You will be provided with a user query. You will have to classify the query into one of the following categories:
 - **code_execution**: The query specifically requires a code to be **executed**, such as plotting, performing numerical calculations, or verifying the output of a code. **Note:** If the user only asks to write the code and not execute it, do not classify it as code_execution.
-- **summary**: The query is either asking for a summary or it requires a large amount of information to be retrieved and summarized.
+- **summary**: If the query contains specific keywords like 'summary', 'summarize', or equivalent terms explicitly requesting a summary of some document, text, or information.
 - **search**: The query is asking for a specific information which can be answered with a single piece of information.
 - **analysis**: The query is asking for a thorough analysis of every part of some document or text, which may require reasoning and understanding of the text.
 - **comparison**: The query is asking for a comparison between two or more entities, which may require multiple sources of information.
@@ -162,7 +164,7 @@ Answer:"""
 # Don't classify into analysis if document is not given
 query_classification_prompt_no_doc = """You are an intelligent AI assistant. You will be provided with a user query. You will have to classify the query into one of the following categories:
 - **code_execution**: The query specifically requires a code to be **executed**, such as plotting, performing numerical calculations, or verifying the output of a code. **Note:** If the user only asks to write the code and not execute it, do not classify it as code_execution.
-- **summary**: The query is either asking for a summary or it requires a large amount of information to be retrieved and summarized.
+- **summary**: If the query contains specific keywords like 'summary', 'summarize', or equivalent terms explicitly requesting a summary of some document, text, or information.
 - **search**: The query is asking for a specific information which can be answered with a single piece of information.
 - **comparison**: The query is asking for a comparison between two or more entities, which may require multiple sources of information.
 
@@ -214,8 +216,8 @@ user_proxy_prompt = """If you have more information to share about the same, sta
 
 hyde_prompt = """If you have knowledge about the topic write a passage that answers the given query, else if you are not aware of the answer expand the given query into a text document for retrieval adding similar keywords and avoid ambiguous words or questions.Return only 3-4 sentences.
 Query: what does chattel mean on credit history
-Passage: A “Chattel” notation on a credit history report is a type of loan that is secured by a person’s tangible property. This type of loan typically includes items such as vehicles, furniture and appliances. Chattel loans are typically obtained for the purposes of making major purchases, such as a car or home appliances. By using the credit report, lenders can check to see if a person has taken out a chattel loan in the past.
+Passage: A “Chattel” notation on a credit history report is a type of loan that is secured by a person's tangible property. This type of loan typically includes items such as vehicles, furniture and appliances. Chattel loans are typically obtained for the purposes of making major purchases, such as a car or home appliances. By using the credit report, lenders can check to see if a person has taken out a chattel loan in the past.
 Query: How much does Microsoft earn annually?
 Passage: Microsoft's annual earnings.  Information sought pertains to Microsoft's total annual revenue or profit.  The query aims to retrieve data on the company's financial performance on a yearly basis.
 Query: {input_query}
-Passage: """
+Passage:"""

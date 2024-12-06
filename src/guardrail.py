@@ -10,7 +10,7 @@ class ChatModerator:
         self.model_id = model_id
         
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self.model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype)
+        self.model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype).to(device)
         
         self.unsafe_categories = """
         O1: Violence and Hate.

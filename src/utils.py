@@ -111,7 +111,7 @@ def hyde(input_query, model) -> Tuple[str, int]:
     prompt = PromptTemplate((hyde_prompt))
     prompt = prompt.format(input_query=input_query)
     result = model.complete(prompt, generation_config={'max_output_tokens':300,"temperature":0.2})
-    query_doc = result.text.replace('#','')
+    query_doc = "".join(filter(str.isalnum or " ",result.text))
     cost = result.raw['usage_metadata']['total_token_count']
     
     return f"{input_query}  {query_doc}", cost
@@ -151,13 +151,13 @@ def extract_non_table_text(page):
 
     return non_table_text.strip()
 
-def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold, large_file_directory):
+def read_file_from_cache_or_parse(uploaded_file, cache, analysis_cache, file_size_threshold,
+                            large_file_directory, risk_analysis_mode = False):
     """Reads a file from cache if available, otherwise parses it."""
     file_name = uploaded_file.name
     file_type = uploaded_file.type
 
-    # Check if the file is large and needs to be stored in the large file directory
-    if uploaded_file.size > file_size_threshold:
+    if (uploaded_file.size > file_size_threshold) and (not risk_analysis_mode):
         large_file_path = os.path.join(large_file_directory, file_name)
         with open(large_file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
@@ -199,8 +199,12 @@ def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold, lar
         cache[file_name] = attached_text
         return attached_text
 
+    if file_name in analysis_cache and risk_analysis_mode:
+        st.success(f"Loaded cached document: {file_name}")
+        return analysis_cache[file_name]
+
     # If the file is not large, process normally
-    if file_name in cache:
+    if file_name in cache and (not risk_analysis_mode):
         st.success(f"Loaded cached document: {file_name}")
         return cache[file_name]
 
@@ -242,8 +246,10 @@ def read_file_from_cache_or_parse(uploaded_file, cache, file_size_threshold, lar
             attached_text = summary_info
             st.write("Preview of Data:")
             st.dataframe(df.head(10))
-
-    cache[file_name] = attached_text
+    if not risk_analysis_mode:
+        cache[file_name] = attached_text
+    else:
+        analysis_cache[file_name] = attached_text
     return attached_text
 
 def evaluate_sufficiency(gemini_model, context_text: str, query: str, total_cost :int) -> Tuple[bool, int]:
@@ -252,6 +258,6 @@ def evaluate_sufficiency(gemini_model, context_text: str, query: str, total_cost
         time.sleep(1) # To avoid rate limiting
         result = gemini_model.complete(evaluation_prompt)
         cost = result.raw['usage_metadata']['total_token_count']
-        if 'no' in result.message.content.lower():
+        if 'no' in result.text.lower():
             return False, cost
         return True, cost
