@@ -576,6 +576,7 @@ if user_input := st.chat_input("Enter your chat prompt:"):
             with st.chat_message("assistant"):
                 st.write(response)
 
+            st.session_state.query_classes.append(None)
         else:
             # Pass the user query to RAG pipeline
             output = rag_pipeline(user_input)
@@ -594,3 +595,4 @@ if user_input := st.chat_input("Enter your chat prompt:"):
         
         st.session_state.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_input))
         st.session_state.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=unsafe_query_resp))
+        st.session_state.query_classes.append(None)
