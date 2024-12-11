@@ -341,6 +341,9 @@ def rag_pipeline(user_input:str) -> Dict[str, str]:
 
                         sec_context = clustered_rag_lsa(lsa_embedder, document_context, num_clusters=int(len(document_context)*0.5), sentences_count=LSA_SENTENCE_COUNT)
 
+                        combined_context = build_prompt(response, doc_context=[doc for doc in sec_context])
+                        st.write(f"LSA token count: {get_num_tokens(combined_context)}")
+
                     else:
                         sec_context = st.session_state.sec_store.as_retriever().retrieve(response)
 
